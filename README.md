@@ -102,6 +102,8 @@ Em produção, `docker-compose.prod.yml` **recusa subir** sem os segredos reais.
 
 ## Testes
 
+**448 testes** no total.
+
 ```bash
 # Backend .NET — 158 testes (unidade + integração com PostgreSQL real)
 cd backend-dotnet
@@ -114,15 +116,31 @@ pnpm test              # sem cobertura
 pnpm test:coverage     # com o limiar de 80% aplicado
 ```
 
-Os testes de integração sobem PostgreSQL sozinhos via **Testcontainers**; basta
-ter Docker. O limiar de 80% é verificado nos dois lados e **o CI falha abaixo
-dele**.
+Os testes de integração do .NET sobem PostgreSQL sozinhos via **Testcontainers**;
+basta ter Docker. Os do frontend usam um banco isolado (`sabemi_test`), criado e
+migrado automaticamente antes de rodar — isso mantém a suíte independente da
+stack de desenvolvimento, cujo worker consumiria a mesma fila.
 
-Com a stack no ar, o teste de fumaça exercita a fiação real (containers, rede,
-migrations, worker em outro processo):
+O limiar de 80% é verificado nos dois lados e **o CI falha abaixo dele**.
+
+### Ponta a ponta — 41 testes contra a stack real
+
+Atravessam a fiação de verdade: containers separados, rede do Docker, migrations
+no entrypoint, worker em outro processo. Rodam contra os **dois backends**.
 
 ```bash
-docker compose up -d --wait
+AUTH_RATE_LIMIT=500 docker compose up -d --wait
+
+cd tests/e2e && pnpm install && pnpm test
+```
+
+O teto de login é elevado porque a suíte faz dezenas de autenticações do mesmo IP
+em segundos — em produção o limite é 10/min. Detalhes em
+[`tests/e2e/README.md`](tests/e2e/README.md).
+
+Varredura rápida da stack (26 verificações):
+
+```bash
 bash scripts/smoke-test.sh
 ```
 

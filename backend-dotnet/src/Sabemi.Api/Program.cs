@@ -71,6 +71,15 @@ builder.Services.AddAuthorization();
 
 // Rate limit apenas no login: e o unico endpoint que um estranho pode martelar
 // sem credencial. O webhook e protegido pela ApiKey, e o dashboard pela sessao.
+//
+// O limite e configuravel porque o valor correto depende do ambiente. Em
+// producao, 10 pedidos por minuto por IP e folgado para uma pessoa e apertado
+// para um script. Uma suite de testes ponta a ponta, que faz dezenas de logins
+// do mesmo IP em segundos, precisa de um teto maior - e sem esta opcao a unica
+// saida seria enfraquecer o limite para todo mundo.
+var authPermitLimit = builder.Configuration.GetValue("RateLimit:AuthPermitLimit", 10);
+var authWindow = builder.Configuration.GetValue("RateLimit:AuthWindow", TimeSpan.FromMinutes(1));
+
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -80,8 +89,8 @@ builder.Services.AddRateLimiter(options =>
             partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "desconhecido",
             factory: _ => new FixedWindowRateLimiterOptions
             {
-                PermitLimit = 10,
-                Window = TimeSpan.FromMinutes(1),
+                PermitLimit = authPermitLimit,
+                Window = authWindow,
                 QueueLimit = 0
             }));
 

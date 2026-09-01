@@ -487,15 +487,27 @@ publicados, e rodam com **usuário sem privilégios**.
 
 ## 13. Testes
 
-**407 testes.** Cobertura de **98,1 %** no backend .NET e **93,8 %** no frontend —
+**448 testes.** Cobertura de **98,1 %** no backend .NET e **93,8 %** no frontend —
 ambos acima do mínimo de 80 % exigido, verificado no pipeline.
 
-| Suíte                  | Testes | Ambiente                          |
-| ---------------------- | ------ | --------------------------------- |
-| .NET — unidade         | 84     | Sem I/O: domínio, validação, HMAC |
-| .NET — integração      | 74     | PostgreSQL real (Testcontainers)  |
-| Frontend — node        | 194    | PostgreSQL real                   |
-| Frontend — componentes | 55     | jsdom + Testing Library           |
+| Suíte                  | Testes | Ambiente                                    |
+| ---------------------- | ------ | ------------------------------------------- |
+| .NET — unidade         | 84     | Sem I/O: domínio, validação, HMAC           |
+| .NET — integração      | 74     | PostgreSQL real (Testcontainers)            |
+| Frontend — node        | 194    | PostgreSQL real                             |
+| Frontend — componentes | 55     | jsdom + Testing Library                     |
+| **Ponta a ponta**      | **41** | **Stack em containers, pela rede**          |
+
+Os E2E (`tests/e2e/`) são os únicos que atravessam a **fiação real** — quatro
+containers, rede do Docker, migrations no entrypoint, worker em outro processo.
+Rodam o mesmo corpo de teste contra os **dois backends** e provam três coisas que
+nenhum outro nível alcança:
+
+- o desktop entra sozinho depois que **outro cliente HTTP** abre o link
+  (dois cookie jars separados — é a única forma honesta de provar cross-device);
+- o trabalho enfileirado por um processo é concluído por **outro container**;
+- a troca de backend muda os **dados**: um evento gravado em um devolve `404` no
+  outro.
 
 ### Por que banco de verdade, e não provider em memória
 
@@ -517,13 +529,11 @@ filtros do dashboard, paginação, autenticação por polling cross-device, expi
 força bruta no OTP, troca de backend, equivalência de contrato entre os dois
 backends e o cookie `httpOnly`.
 
-Além disso, `scripts/smoke-test.sh` exercita a **fiação real** — containers
-separados, rede do Docker, migrations no entrypoint, worker em outro processo. É
-o que pega a classe de defeito que nenhum teste de integração alcança: variável de
-ambiente com o nome errado, serviço apontando para `localhost` em vez do nome do
-container. Tudo verde e a aplicação no ar sem funcionar.
+Além disso, `scripts/smoke-test.sh` faz uma varredura rápida (26 verificações)
+sobre a stack no ar — se algo óbvio estiver quebrado, o CI falha em segundos em
+vez de esperar a suíte completa.
 
-### Três defeitos reais encontrados pelos testes
+### Defeitos reais encontrados pelos testes
 
 1. **`.When()` do FluentValidation aplicado à cadeia inteira** — um payload sem
    `data_pagamento` passava na validação e só estourava depois, ao acessar
@@ -534,6 +544,12 @@ container. Tudo verde e a aplicação no ar sem funcionar.
 3. **`EnableRetryOnFailure` incompatível com transações manuais** — corrigido com
    o padrão de estratégia de execução do EF Core, e com releitura do estado a cada
    tentativa, para que uma reexecução não somasse o mesmo pagamento duas vezes.
+4. **Healthcheck usando `localhost` dentro do container** — resolvia para IPv6
+   enquanto os servidores escutam em IPv4, e o compose marcava containers
+   saudáveis como `unhealthy`. Só apareceu ao subir a stack de verdade.
+5. **`pnpm test` falhando em clone limpo** — o Vitest não carrega `.env`, e
+   depois de carregá-lo os valores locais passaram a sobrescrever as fixtures da
+   suíte. Encontrado clonando o repositório e seguindo apenas o README.
 
 ---
 
@@ -600,9 +616,8 @@ próximo passo natural é aceitar um conjunto de chaves em vez de uma só.
 não há botão para reenfileirar. O payload bruto está preservado, então o
 reprocessamento é possível — só não tem interface ainda.
 
-**Imagens .NET não construídas neste ambiente.** O registro da Microsoft (MCR)
-está inacessível a partir da máquina onde o projeto foi montado, então
-`docker compose build api worker` não pôde ser executado localmente. Os comandos
-de publicação do Dockerfile foram verificados fora do container e produzem
-exatamente os artefatos que o `ENTRYPOINT` espera; a imagem do frontend foi
-construída e validada em execução. O job `docker` do CI constrói as três.
+**Rate limit do login e a suíte E2E.** O endpoint de autenticação aceita 10
+pedidos por minuto por IP — apropriado para produção, apertado para uma suíte que
+faz dezenas de logins do mesmo IP em segundos. O limite é configurável
+(`RateLimit:AuthPermitLimit`) e a suíte sobe a stack com um teto maior. A
+alternativa seria enfraquecer o limite para todo mundo.

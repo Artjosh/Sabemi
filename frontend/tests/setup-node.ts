@@ -6,12 +6,15 @@
  * dentro de um teste chegaria tarde demais.
  */
 
-// O Vitest nao carrega `.env` sozinho. Sem isto, `pnpm test` falha logo no
-// primeiro import com "DATABASE_URL nao configurada" para quem seguiu o README
-// e copiou o `.env.example` - o caminho normal de quem acabou de clonar.
+// O que veio do SHELL, capturado antes de qualquer `.env` entrar em cena.
 //
-// Em CI a variavel vem do ambiente e nao ha arquivo; por isso a falha e
-// ignorada em vez de interromper.
+// A distincao importa: uma variavel definida na linha de comando (ou pelo CI) e
+// uma instrucao deliberada e deve vencer. Uma que veio do `.env` e configuracao
+// de DESENVOLVIMENTO, e nao pode arrastar a suite para o banco de trabalho.
+const doShell = { DATABASE_URL: process.env.DATABASE_URL };
+
+// O Vitest nao carrega `.env` sozinho. Carregar aqui mantem o ambiente coerente
+// com o resto do projeto, mas ele nao decide nada critico - ver abaixo.
 try {
   process.loadEnvFile(".env");
 } catch {
@@ -58,6 +61,24 @@ env.BFF_WORKER_ENABLED = "false";
 
 env.BFF_PUBLIC_BASE_URL = "http://localhost:3000";
 
-// A unica variavel que o ambiente PODE definir: onde o PostgreSQL esta.
-// Depende da maquina (porta, host, credenciais), e nao da suite.
-env.DATABASE_URL ??= "postgresql://sabemi:sabemi@localhost:5432/sabemi?schema=vinext";
+/**
+ * A unica variavel que o ambiente PODE definir: onde o PostgreSQL esta.
+ * Depende da maquina (porta, host, credenciais), e nao da suite.
+ *
+ * <b>Repare no banco: `sabemi_test`, e nao `sabemi`.</b> Isso nao e detalhe.
+ *
+ * Com a stack no ar, o container do frontend roda o laco de processamento do
+ * BFF contra o schema `vinext` do banco de desenvolvimento. Se a suite usasse o
+ * mesmo banco, aquele worker reivindicaria os jobs que os testes acabaram de
+ * enfileirar - e as verificacoes de fila falhariam de forma intermitente, com o
+ * erro apontando para o codigo em vez de para a interferencia.
+ *
+ * A precedencia e: shell > banco de teste. O `.env` fica de fora de proposito -
+ * ele aponta para o banco de trabalho, e deixa-lo vencer traria de volta a
+ * interferencia que este isolamento existe para evitar.
+ *
+ * O banco e preparado automaticamente pelo `pretest`; para faze-lo a mao:
+ *   pnpm db:test:setup
+ */
+env.DATABASE_URL =
+  doShell.DATABASE_URL ?? "postgresql://sabemi:sabemi@localhost:5432/sabemi_test?schema=vinext";

@@ -154,6 +154,9 @@ jobs:
       - name: Gera o cliente do Prisma
         run: pnpm prisma generate
 
+      # O `pretest` tambem faz isto, mas rodar antes do typecheck garante que um
+      # schema desatualizado apareca como erro de migration, e nao como uma
+      # falha de teste confusa.
       - name: Aplica as migrations
         run: pnpm prisma migrate deploy
 
@@ -213,7 +216,7 @@ jobs:
 
   # ------------------------------------------------------------------ docker
   docker:
-    name: Imagens Docker
+    name: Imagens Docker + E2E
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
@@ -258,17 +261,44 @@ jobs:
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,scope=frontend,mode=max
 
-      # Construir nao prova que a imagem SOBE. Este passo levanta a stack inteira
-      # e exercita o fluxo real - webhook, idempotencia e processamento em
-      # background - contra os containers recem-criados.
-      - name: Teste de fumaca da stack completa
-        run: |
-          docker compose up -d --wait --wait-timeout 180
-          bash scripts/smoke-test.sh
+      # Construir nao prova que a imagem SOBE. Os dois passos abaixo levantam a
+      # stack inteira e a exercitam de verdade.
+      - name: Sobe a stack
+        env:
+          # Teto de login maior que o de producao: a suite ponta a ponta faz
+          # dezenas de autenticacoes do mesmo IP em segundos, e o limite real
+          # (10/min) a derrubaria por estar funcionando corretamente.
+          AUTH_RATE_LIMIT: "500"
+        run: docker compose up -d --wait --wait-timeout 240
+
+      # Verificacao rapida: se algo obvio estiver quebrado, falha aqui em
+      # segundos em vez de esperar a suite completa.
+      - name: Teste de fumaca
+        run: bash scripts/smoke-test.sh
+
+      - name: Configura o pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Configura o Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Instala as dependencias do E2E
+        working-directory: tests/e2e
+        run: pnpm install --no-frozen-lockfile
+
+      # A suite que atravessa a fiacao real: containers separados, rede do
+      # Docker, migrations no entrypoint, worker em outro processo. E o unico
+      # nivel que pega variavel de ambiente com nome errado ou serviço apontando
+      # para localhost.
+      - name: Testes ponta a ponta
+        working-directory: tests/e2e
+        run: pnpm test
 
       - name: Logs em caso de falha
         if: failure()
-        run: docker compose logs --tail 100
+        run: docker compose logs --tail 150
 
       - name: Derruba a stack
         if: always()
