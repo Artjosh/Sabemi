@@ -101,7 +101,7 @@ export function Badge({ className, tone, ...props }: BadgeProps) {
  * O icone acompanha a cor de proposito: cor sozinha nao e acessivel a quem nao
  * distingue verde de vermelho.
  */
-export const STATUS_APPEARANCE: Record<
+const STATUS_APPEARANCE: Record<
   ProcessingStatus,
   { tone: NonNullable<BadgeProps["tone"]>; icon: string; label: string }
 > = {

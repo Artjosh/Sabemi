@@ -15,9 +15,10 @@ import { cn } from "@/lib/utils";
  * o resto da pagina dos leitores de tela.
  */
 
+// Apenas o Root e reexportado: este dialogo e controlado por prop (`open`), e
+// nao por um elemento disparador. Reexportar Trigger e Close so por convencao
+// deixaria dois simbolos mortos no repositorio.
 export const Dialog = DialogPrimitive.Root;
-export const DialogTrigger = DialogPrimitive.Trigger;
-export const DialogClose = DialogPrimitive.Close;
 
 export const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
