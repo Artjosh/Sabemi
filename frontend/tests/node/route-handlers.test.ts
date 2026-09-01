@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { prisma } from "@/server/bff/db";
+import { chamadaFetch, jsonResponse, stubFetch } from "../helpers";
 
 /**
  * Route handlers do VINEXT - a camada onde a troca de backend e o padrao BFF
@@ -103,7 +104,7 @@ describe("gateway /api/gateway/[...path]", () => {
 
   it("despacha para o backend .NET por padrão, sem cookie", async () => {
     // O primário exigido pela vaga é o padrão.
-    const fetchMock = vi.fn(async () =>
+    const fetchMock = stubFetch(
       new Response(JSON.stringify({ status: "healthy", backend: "dotnet" }), {
         status: 200,
         headers: { "content-type": "application/json" },
@@ -125,7 +126,8 @@ describe("gateway /api/gateway/[...path]", () => {
     // e entra na chamada sem nunca ter passado pelo browser.
     jar.set("sabemi_session", "jwt-secreto");
 
-    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    const fetchMock = stubFetch(
+      new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
     const { GET } = await import("@/app/api/gateway/[...path]/route");
@@ -133,7 +135,7 @@ describe("gateway /api/gateway/[...path]", () => {
       params: Promise.resolve({ path: ["payments"] }),
     });
 
-    const headers = (fetchMock.mock.calls[0][1] as RequestInit).headers as Headers;
+    const headers = chamadaFetch(fetchMock).headers;
     expect(headers.get("Authorization")).toBe("Bearer jwt-secreto");
   });
 

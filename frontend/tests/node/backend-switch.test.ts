@@ -8,6 +8,7 @@ import {
   listBackends,
 } from "@/server/backends/registry";
 import { prisma } from "@/server/bff/db";
+import { chamadaFetch, jsonResponse, stubFetch } from "../helpers";
 import { resolveBackend, sessionCookieOptions, backendCookieOptions } from "@/server/session";
 
 /**
@@ -161,7 +162,7 @@ describe("adapter .NET (proxy HTTP)", () => {
   });
 
   it("encaminha método, caminho e query para o serviço remoto", async () => {
-    const fetchMock = vi.fn(async () =>
+    const fetchMock = stubFetch(
       new Response(JSON.stringify({ status: "healthy", backend: "dotnet" }), {
         status: 200,
         headers: { "content-type": "application/json" },
@@ -173,7 +174,7 @@ describe("adapter .NET (proxy HTTP)", () => {
       requisicao({ path: "payments", searchParams: new URLSearchParams({ status: "SUCESSO" }) }),
     );
 
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const { url, init } = chamadaFetch(fetchMock);
 
     expect(url).toContain("/payments");
     expect(url).toContain("status=SUCESSO");
@@ -186,19 +187,21 @@ describe("adapter .NET (proxy HTTP)", () => {
   it("injeta o token da sessão como Authorization: Bearer", async () => {
     // O token vem do cookie httpOnly, lido no servidor. É aqui que ele entra na
     // chamada ao backend, sem nunca ter passado pelo browser.
-    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    const fetchMock = stubFetch(
+      new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
     await dotnet.handle(requisicao({ path: "payments", token: "jwt-da-sessao" }));
 
-    const headers = (fetchMock.mock.calls[0][1] as RequestInit).headers as Headers;
+    const headers = chamadaFetch(fetchMock).headers;
     expect(headers.get("Authorization")).toBe("Bearer jwt-da-sessao");
   });
 
   it("repassa ApiKey e assinatura do webhook intactas", async () => {
     // É o backend .NET quem valida a assinatura, e ela cobre o corpo bruto:
     // qualquer alteração no caminho a invalidaria.
-    const fetchMock = vi.fn(async () => new Response("{}", { status: 202 }));
+    const fetchMock = stubFetch(
+      new Response("{}", { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);
 
     const headers = new Headers({
@@ -210,14 +213,15 @@ describe("adapter .NET (proxy HTTP)", () => {
       requisicao({ method: "POST", path: "webhooks/pagamento", rawBody: "{}", headers }),
     );
 
-    const enviados = (fetchMock.mock.calls[0][1] as RequestInit).headers as Headers;
+    const enviados = chamadaFetch(fetchMock).headers;
     expect(enviados.get("x-api-key")).toBe("chave-do-parceiro");
     expect(enviados.get("x-signature")).toBe("assinatura-hex");
   });
 
   it("envia o corpo bruto sem reserializar", async () => {
     // Reserializar mudaria espaços e ordem de chaves, quebrando a assinatura.
-    const fetchMock = vi.fn(async () => new Response("{}", { status: 202 }));
+    const fetchMock = stubFetch(
+      new Response("{}", { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);
 
     const corpoExato = '{"id_transacao":"X",  "valor":  1}';
@@ -226,16 +230,17 @@ describe("adapter .NET (proxy HTTP)", () => {
       requisicao({ method: "POST", path: "webhooks/pagamento", rawBody: corpoExato }),
     );
 
-    expect((fetchMock.mock.calls[0][1] as RequestInit).body).toBe(corpoExato);
+    expect(chamadaFetch(fetchMock).init.body).toBe(corpoExato);
   });
 
   it("não envia corpo em requisições GET", async () => {
-    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    const fetchMock = stubFetch(
+      new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
     await dotnet.handle(requisicao({ method: "GET", path: "payments" }));
 
-    expect((fetchMock.mock.calls[0][1] as RequestInit).body).toBeUndefined();
+    expect(chamadaFetch(fetchMock).init.body).toBeUndefined();
   });
 
   it("traduz backend fora do ar em ProblemDetails, e não em tela quebrada", async () => {

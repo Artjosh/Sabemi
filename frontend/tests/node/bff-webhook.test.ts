@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { computeSignature } from "@/server/bff/crypto";
 import { prisma } from "@/server/bff/db";
@@ -172,20 +172,30 @@ describe("ingestão", () => {
   });
 
   it("responde rápido mesmo com a regra pesada em duração real", async () => {
-    // O critério da task. Reimporta o serviço com a duração real, porque o
-    // config é lido no carregamento do módulo.
+    // O critério da task: a regra de ~2s não pode entrar no caminho da resposta.
+    //
+    // `resetModules` + import dinâmico força uma instância nova do serviço, para
+    // que ele releia a configuração com a duração REAL - o config é lido uma vez,
+    // no carregamento do módulo, e os demais testes rodam com duração zero.
+    vi.resetModules();
     process.env.PROCESSING_SIMULATED_WORK_MS = "2000";
-    const mod = await import("@/server/bff/payments-service?real-work");
 
-    const inicio = performance.now();
-    const resultado = await mod.ingestPayment(payload({ id_transacao: "TRX-RAPIDO" }), false);
-    const decorrido = performance.now() - inicio;
+    try {
+      const { ingestPayment } = await import("@/server/bff/payments-service");
 
-    process.env.PROCESSING_SIMULATED_WORK_MS = "0";
+      const inicio = performance.now();
+      const resultado = await ingestPayment(payload({ id_transacao: "TRX-RAPIDO" }), false);
+      const decorrido = performance.now() - inicio;
 
-    expect(resultado.kind).toBe("accepted");
-    // A ingestão não executa a regra: ela só grava e enfileira.
-    expect(decorrido).toBeLessThan(1000);
+      expect(resultado.kind).toBe("accepted");
+      // A ingestão apenas grava e enfileira; quem paga os 2s é o worker.
+      expect(decorrido).toBeLessThan(1000);
+    } finally {
+      // Restaura o ambiente mesmo se a asserção falhar - senão o vazamento
+      // deixaria os testes seguintes lentos, com a causa em outro arquivo.
+      process.env.PROCESSING_SIMULATED_WORK_MS = "0";
+      vi.resetModules();
+    }
   });
 });
 

@@ -6,7 +6,10 @@
  * defini-las dentro de um teste chegaria tarde demais.
  */
 
-process.env.NODE_ENV ??= "test";
+// `NODE_ENV` e declarado readonly nos tipos do Node, mas e gravavel em
+// execucao. O alias tipado permite a atribuicao sem recorrer a `any`.
+const env = process.env as Record<string, string | undefined>;
+env.NODE_ENV ??= "test";
 
 // Mesmos segredos do backend .NET nos testes, para exercitar a equivalencia de
 // contrato entre os dois.

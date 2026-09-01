@@ -15,6 +15,7 @@ import {
   switchBackend,
   verifyOtp,
 } from "@/lib/api-client";
+import { chamadaFetch, jsonResponse, stubFetch } from "../helpers";
 
 /**
  * Cliente de API usado pela interface.
@@ -31,18 +32,7 @@ import {
  *      "tente de novo".
  */
 
-function stubFetch(resposta: Response | (() => Promise<Response>)) {
-  const mock = vi.fn(typeof resposta === "function" ? resposta : async () => resposta);
-  vi.stubGlobal("fetch", mock);
-  return mock;
-}
-
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-}
+const json = jsonResponse;
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -60,7 +50,7 @@ describe("todas as chamadas são same-origin", () => {
 
     await chamada();
 
-    const url = fetchMock.mock.calls[0][0] as string;
+    const { url } = chamadaFetch(fetchMock);
     // Caminho relativo: nada de host, protocolo ou porta.
     expect(url.startsWith("/api/")).toBe(true);
     expect(url).not.toContain("http");
@@ -71,7 +61,7 @@ describe("todas as chamadas são same-origin", () => {
 
     await listPayments();
 
-    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    const { init } = chamadaFetch(fetchMock);
     expect(init.credentials).toBe("same-origin");
     // O dashboard atualiza por polling: uma resposta cacheada mostraria dados
     // velhos.
@@ -85,7 +75,7 @@ describe("montagem dos filtros", () => {
 
     await listPayments();
 
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/gateway/payments");
+    expect(chamadaFetch(fetchMock).url).toBe("/api/gateway/payments");
   });
 
   it("inclui apenas os filtros informados", async () => {
@@ -93,7 +83,7 @@ describe("montagem dos filtros", () => {
 
     await listPayments({ status: "ERRO", contractId: "CTR-A", page: 2, pageSize: 50 });
 
-    const url = fetchMock.mock.calls[0][0] as string;
+    const { url } = chamadaFetch(fetchMock);
     expect(url).toContain("status=ERRO");
     expect(url).toContain("contractId=CTR-A");
     expect(url).toContain("page=2");
@@ -105,7 +95,7 @@ describe("montagem dos filtros", () => {
 
     await listPayments({ status: null, contractId: null });
 
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/gateway/payments");
+    expect(chamadaFetch(fetchMock).url).toBe("/api/gateway/payments");
   });
 
   it("escapa identificadores com caracteres especiais", async () => {
@@ -114,7 +104,7 @@ describe("montagem dos filtros", () => {
 
     await getPaymentDetail("TRX/001 #2");
 
-    expect(fetchMock.mock.calls[0][0]).toContain("TRX%2F001%20%232");
+    expect(chamadaFetch(fetchMock).url).toContain("TRX%2F001%20%232");
   });
 
   it("escapa o id do contrato", async () => {
@@ -122,7 +112,7 @@ describe("montagem dos filtros", () => {
 
     await getContract("CTR/A&B");
 
-    expect(fetchMock.mock.calls[0][0]).toContain("CTR%2FA%26B");
+    expect(chamadaFetch(fetchMock).url).toContain("CTR%2FA%26B");
   });
 });
 
@@ -202,8 +192,8 @@ describe("endpoints de autenticação", () => {
 
     await startLogin("a@b.com");
 
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/auth/login?step=start");
-    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(chamadaFetch(fetchMock).url).toBe("/api/auth/login?step=start");
+    const { init } = chamadaFetch(fetchMock);
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body as string)).toEqual({ email: "a@b.com" });
   });
@@ -213,8 +203,8 @@ describe("endpoints de autenticação", () => {
 
     await pollLogin("sel-1");
 
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/auth/login?step=poll");
-    expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)).toEqual({
+    expect(chamadaFetch(fetchMock).url).toBe("/api/auth/login?step=poll");
+    expect(JSON.parse(chamadaFetch(fetchMock).init.body as string)).toEqual({
       selector: "sel-1",
     });
   });
@@ -224,8 +214,8 @@ describe("endpoints de autenticação", () => {
 
     await verifyOtp("sel-1", "123456");
 
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/auth/login?step=otp");
-    expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)).toEqual({
+    expect(chamadaFetch(fetchMock).url).toBe("/api/auth/login?step=otp");
+    expect(JSON.parse(chamadaFetch(fetchMock).init.body as string)).toEqual({
       selector: "sel-1",
       code: "123456",
     });
@@ -236,7 +226,7 @@ describe("endpoints de autenticação", () => {
 
     await clearSession();
 
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/auth/session");
+    expect(chamadaFetch(fetchMock).url).toBe("/api/auth/session");
     expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe("DELETE");
   });
 });
@@ -249,8 +239,8 @@ describe("troca de backend", () => {
 
     const resultado = await switchBackend("vinext");
 
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/backend");
-    expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)).toEqual({
+    expect(chamadaFetch(fetchMock).url).toBe("/api/backend");
+    expect(JSON.parse(chamadaFetch(fetchMock).init.body as string)).toEqual({
       backend: "vinext",
     });
     expect(resultado.session_cleared).toBe(true);
@@ -263,7 +253,7 @@ describe("troca de backend", () => {
 
     const saude = await getHealth();
 
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/gateway/health");
+    expect(chamadaFetch(fetchMock).url).toBe("/api/gateway/health");
     expect(saude.backend).toBe("vinext");
   });
 });
