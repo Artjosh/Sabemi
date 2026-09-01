@@ -62,9 +62,9 @@ USER app
 
 ENV ASPNETCORE_URLS=http://+:8080 \
     DOTNET_RUNNING_IN_CONTAINER=true \
-    # Sem isto, o .NET pre-compila os assemblies em toda inicializacao, o que
-    # atrasa a subida de um container que sera reiniciado com frequencia.
-    DOTNET_TieredPMStubs=0
+    # Desliga a coleta de diagnostico por arquivo mapeado, que nao tem uso num
+    # container e evita escrita desnecessaria em /tmp.
+    DOTNET_EnableDiagnostics=0
 
 EXPOSE 8080
 
