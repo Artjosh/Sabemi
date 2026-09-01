@@ -1,5 +1,7 @@
 node_modules
 .env*
+# ...mas o exemplo PRECISA ser versionado: e o que o README manda copiar.
+!.env.example
 .next
 next-env.d.ts
 /dist/
