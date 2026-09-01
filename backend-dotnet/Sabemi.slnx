@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Sabemi.Api/Sabemi.Api.csproj" />
+    <Project Path="src/Sabemi.Application/Sabemi.Application.csproj" />
+    <Project Path="src/Sabemi.Domain/Sabemi.Domain.csproj" />
+    <Project Path="src/Sabemi.Infrastructure/Sabemi.Infrastructure.csproj" />
+    <Project Path="src/Sabemi.Worker/Sabemi.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Sabemi.IntegrationTests/Sabemi.IntegrationTests.csproj" />
+    <Project Path="tests/Sabemi.UnitTests/Sabemi.UnitTests.csproj" />
+  </Folder>
+</Solution>

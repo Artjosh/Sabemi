@@ -1,0 +1,158 @@
+/*
+ * Sistema visual do painel.
+ *
+ * TRES TECNOLOGIAS, TRES PAPEIS QUE NAO SE SOBREPOEM
+ * --------------------------------------------------
+ * Misturar Tailwind e Bootstrap costuma dar errado por um motivo especifico: os
+ * dois trazem um reset global (`preflight` e `reboot`) e regras para os mesmos
+ * elementos. Carregar o Bootstrap inteiro aqui faria um lutar contra o outro em
+ * botoes, formularios e tipografia, com o vencedor decidido pela ordem do
+ * import - exatamente a "mistura desorganizada" a evitar.
+ *
+ * A divisao adotada da a cada um um territorio proprio:
+ *
+ *   TAILWIND CSS  - o motor de estilo. Utilitarios, tokens de cor, espacamento,
+ *                   modo escuro. Traz o unico reset da aplicacao.
+ *
+ *   SHADCN/UI     - a camada de componentes. Button, Card, Badge, Table, Dialog,
+ *                   Select - construidos sobre Radix e estilizados com Tailwind.
+ *                   Sao componentes deste repositorio (em `components/ui/`), nao
+ *                   uma dependencia opaca: da para le-los e ajusta-los.
+ *
+ *   BOOTSTRAP     - entra apenas por `bootstrap-grid.css`, o build que contem SO
+ *                   o sistema de grid (container/row/col, gutters, breakpoints) -
+ *                   sem reboot, sem componentes, sem utilitarios. Zero conflito
+ *                   com o preflight do Tailwind, verificavel abrindo o arquivo.
+ *                   Usado no esqueleto responsivo do dashboard, onde o grid de
+ *                   12 colunas expressa a intencao melhor do que uma pilha de
+ *                   utilitarios. Mais `bootstrap-icons` para a iconografia de
+ *                   dominio.
+ *
+ * Resumindo: Bootstrap cuida do ESQUELETO e dos ICONES, Tailwind da PELE,
+ * shadcn/ui dos ORGAOS. Cada regra tem um dono unico.
+ */
+
+@import "tailwindcss";
+
+/* Somente o grid - ver a explicacao acima. */
+@import "bootstrap/dist/css/bootstrap-grid.css" layer(base);
+@import "bootstrap-icons/font/bootstrap-icons.css";
+
+/*
+ * Tokens do tema, expostos ao Tailwind v4 por @theme.
+ *
+ * As cores de situacao (sucesso/erro/aviso) sao tokens e nao classes soltas:
+ * a mesma cor identifica um estado na tabela, no cartao e no badge, e um token
+ * garante que as tres nunca saiam de sincronia.
+ */
+@theme {
+  --color-surface: #ffffff;
+  --color-surface-muted: #f8fafc;
+  --color-border-subtle: #e2e8f0;
+
+  --color-brand: #0f766e;
+  --color-brand-strong: #115e59;
+  --color-brand-soft: #ccfbf1;
+
+  --color-state-success: #15803d;
+  --color-state-success-soft: #dcfce7;
+  --color-state-error: #b91c1c;
+  --color-state-error-soft: #fee2e2;
+  --color-state-warning: #b45309;
+  --color-state-warning-soft: #fef3c7;
+  --color-state-info: #1d4ed8;
+  --color-state-info-soft: #dbeafe;
+  --color-state-neutral: #475569;
+  --color-state-neutral-soft: #f1f5f9;
+
+  --radius-card: 0.875rem;
+}
+
+:root {
+  color-scheme: light;
+  --background: #f1f5f9;
+  --foreground: #0f172a;
+  --muted-foreground: #64748b;
+}
+
+/*
+ * Tema escuro pela preferencia do sistema.
+ *
+ * O painel e uma ferramenta de trabalho, usada por horas seguidas; respeitar a
+ * preferencia do sistema evita a tela clara estourando numa sala escura.
+ */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --background: #020617;
+    --foreground: #e2e8f0;
+    --muted-foreground: #94a3b8;
+
+    --color-surface: #0f172a;
+    --color-surface-muted: #1e293b;
+    --color-border-subtle: #1e293b;
+
+    --color-brand: #2dd4bf;
+    --color-brand-strong: #5eead4;
+    --color-brand-soft: #134e4a;
+
+    --color-state-success: #4ade80;
+    --color-state-success-soft: #14532d;
+    --color-state-error: #f87171;
+    --color-state-error-soft: #7f1d1d;
+    --color-state-warning: #fbbf24;
+    --color-state-warning-soft: #78350f;
+    --color-state-info: #60a5fa;
+    --color-state-info-soft: #1e3a8a;
+    --color-state-neutral: #94a3b8;
+    --color-state-neutral-soft: #1e293b;
+  }
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--background);
+  color: var(--foreground);
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/*
+ * Foco visivel e consistente.
+ *
+ * O painel e operavel por teclado; o anel padrao do browser desaparece sobre
+ * varios dos fundos usados aqui.
+ */
+:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+}
+
+/*
+ * Numeros tabulares nas colunas de valor e data.
+ *
+ * Sem isto os digitos tem larguras diferentes e as colunas "dancam" a cada
+ * atualizacao do polling, o que atrapalha a leitura de uma tabela que se
+ * atualiza sozinha a cada poucos segundos.
+ */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Respeita quem pediu menos animacao no sistema. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

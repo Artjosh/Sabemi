@@ -1,0 +1,25 @@
+# .NET
+[Bb]in/
+[Oo]bj/
+TestResults/
+*.user
+
+# Node
+node_modules/
+dist/
+.next/
+coverage/
+
+# Prisma: o cliente e gerado por `pnpm prisma generate` (roda no postinstall)
+frontend/generated/
+
+# Ambiente
+.env
+.env.local
+!.env.example
+
+# Diversos
+*.log
+.DS_Store
+.vs/
+.idea/

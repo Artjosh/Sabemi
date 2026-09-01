@@ -1,0 +1,600 @@
+openapi: 3.1.0
+info:
+  title: Sabemi Payment Webhooks API
+  version: 1.0.0
+  description: |
+    Contrato funcional unico, implementado de forma independente por dois backends:
+
+      * `backend-dotnet` - ASP.NET Core + EF Core + PostgreSQL (schema `dotnet`).
+      * `frontend/app/api/bff` - VINEXT route handlers + Prisma + PostgreSQL (schema `vinext`).
+
+    O frontend nunca sabe qual implementacao esta ativa: ele fala sempre com
+    `/api/gateway/*` (same-origin), e o gateway despacha para o backend
+    selecionado. Este documento e a fonte de verdade desse acordo - qualquer
+    divergencia entre os dois backends e um bug de contrato.
+
+servers:
+  - url: /api/gateway
+    description: Gateway same-origin do frontend (despacha para o backend ativo)
+  - url: http://localhost:8080
+    description: Backend .NET acessado diretamente
+  - url: http://localhost:3000/api/bff
+    description: Backend VINEXT/BFF acessado diretamente
+
+tags:
+  - name: webhooks
+    description: Ingestao de notificacoes do banco parceiro
+  - name: auth
+    description: Autenticacao passwordless com polling cross-device
+  - name: payments
+    description: Consulta do dashboard administrativo
+
+paths:
+  # ---------------------------------------------------------------- webhooks
+  /webhooks/pagamento:
+    post:
+      tags: [webhooks]
+      summary: Recebe uma notificacao de pagamento do banco parceiro
+      description: |
+        Endpoint de ingestao. Responde rapido (nao executa a regra de negocio
+        pesada em linha): valida, persiste o evento bruto e enfileira o
+        processamento na mesma transacao.
+
+        Idempotencia e garantida no nivel de persistencia por um indice unico
+        sobre `id_transacao`. Uma reentrega da mesma transacao devolve `200` com
+        `duplicate: true` e nao enfileira um segundo processamento.
+
+        Um payload que falha na validacao ainda e persistido (com
+        `status_processamento=INVALIDO` e o motivo), para ficar auditavel no
+        dashboard.
+      security:
+        - ApiKeyAuth: []
+        - ApiKeyAuth: []
+          SignatureAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentWebhookRequest'
+      responses:
+        '202':
+          description: Evento aceito e enfileirado para processamento em background.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookAck'
+        '200':
+          description: Reentrega de um `id_transacao` ja conhecido - nada foi reprocessado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookAck'
+        '400':
+          description: |
+            Payload invalido. O evento e persistido mesmo assim (status
+            `INVALIDO`) para aparecer no dashboard com alerta visual.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: Header `X-Api-Key` ausente ou incorreto.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Header `X-Signature` invalido para o corpo recebido.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  # -------------------------------------------------------------------- auth
+  /auth/magic-link:
+    post:
+      tags: [auth]
+      summary: Inicia um pedido de login passwordless
+      description: |
+        Cria um pedido de login e devolve o `selector` - o identificador publico
+        que a aba de origem usa no polling. O segredo (magic token) viaja apenas
+        no link do e-mail; o codigo OTP e a alternativa para o mesmo dispositivo.
+
+        Em desenvolvimento (`EXPOSE_LOGIN_CODES=true` e ambiente != production)
+        o link e o codigo voltam no corpo para facilitar a demonstracao. Em
+        producao esses campos sao sempre `null` (falha fechada).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        '200':
+          description: Pedido de login criado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MagicLinkStart'
+        '400':
+          description: E-mail ausente ou malformado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit por e-mail/IP excedido.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /auth/confirm:
+    get:
+      tags: [auth]
+      summary: Alvo do link do e-mail - aprova o login em qualquer dispositivo
+      description: |
+        Cross-device: pode ser aberto em um aparelho diferente daquele que pediu
+        o login. Marca o pedido como `approved`; a aba de origem descobre isso
+        no proximo ciclo de polling. Devolve uma pagina HTML, nao JSON.
+      security: []
+      parameters:
+        - in: query
+          name: token
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Login aprovado - volte para a aba de origem.
+        '400':
+          description: Link invalido ou expirado.
+
+  /auth/verify-otp:
+    post:
+      tags: [auth]
+      summary: Valida o codigo de 6 digitos (mesmo dispositivo)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [selector, code]
+              properties:
+                selector: { type: string }
+                code:
+                  type: string
+                  pattern: '^[0-9]{6}$'
+      responses:
+        '200':
+          description: Codigo correto - sessao emitida e pedido consumido.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginStatus'
+        '400':
+          description: Codigo incorreto. A tentativa e contabilizada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Pedido de login inexistente, expirado ou ja consumido.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Excedeu o numero de tentativas - o pedido e destruido.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /auth/login-status:
+    post:
+      tags: [auth]
+      summary: Polling - troca o selector por uma sessao quando aprovado
+      description: |
+        Chamado em intervalo fixo pela aba que iniciou o login. Enquanto
+        pendente devolve `status: "pending"`. Quando o link e confirmado (em
+        qualquer dispositivo) devolve `status: "approved"` junto do token, e o
+        pedido e consumido - uma segunda chamada com o mesmo selector devolve
+        `404`, que o cliente trata como sinal de parada definitiva.
+      security: []
+      parameters:
+        - in: query
+          name: selector
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Estado atual do pedido de login.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginStatus'
+        '404':
+          description: Pedido inexistente, expirado ou ja consumido - encerre o polling.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /auth/me:
+    get:
+      tags: [auth]
+      summary: Dados do usuario autenticado
+      responses:
+        '200':
+          description: Usuario da sessao corrente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          description: Sessao ausente ou invalida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  # ---------------------------------------------------------------- payments
+  /payments:
+    get:
+      tags: [payments]
+      summary: Lista os eventos de pagamento recebidos (dashboard)
+      description: |
+        Alimenta o dashboard administrativo. O cliente atualiza por polling; a
+        paginacao e por offset para manter o contrato simples e identico nos
+        dois backends.
+      parameters:
+        - in: query
+          name: status
+          description: |
+            Filtro por situacao. `SUCESSO` e `ERRO` sao os dois exigidos pela
+            task; os demais existem porque o processamento e assincrono e o
+            dashboard precisa distinguir os estados intermediarios.
+          schema:
+            $ref: '#/components/schemas/ProcessingStatus'
+        - in: query
+          name: contractId
+          description: Filtro por `id_contrato` (correspondencia exata).
+          schema: { type: string }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: pageSize
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Pagina de eventos, mais recentes primeiro.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentEventPage'
+        '401':
+          description: Sessao ausente ou invalida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /payments/summary:
+    get:
+      tags: [payments]
+      summary: Contadores por situacao, para os cartoes do dashboard
+      responses:
+        '200':
+          description: Totais agregados.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentSummary'
+        '401':
+          description: Sessao ausente ou invalida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /payments/{transactionId}:
+    get:
+      tags: [payments]
+      summary: Detalhe de um evento, incluindo o payload bruto recebido
+      parameters:
+        - in: path
+          name: transactionId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Evento encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentEventDetail'
+        '404':
+          description: Evento inexistente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /contracts/{contractId}:
+    get:
+      tags: [payments]
+      summary: Estado consolidado de um contrato
+      parameters:
+        - in: path
+          name: contractId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Contrato encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContractStatus'
+        '404':
+          description: Contrato inexistente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /health:
+    get:
+      tags: [payments]
+      summary: Liveness/readiness - usado pelo seletor de backend e pelo Docker
+      security: []
+      responses:
+        '200':
+          description: Backend no ar.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, backend]
+                properties:
+                  status:
+                    type: string
+                    enum: [healthy, degraded]
+                  backend:
+                    type: string
+                    enum: [dotnet, vinext]
+                    description: Identifica qual implementacao respondeu.
+                  version: { type: string }
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+      description: Chave compartilhada com o banco parceiro. Comparada em tempo constante.
+    SignatureAuth:
+      type: apiKey
+      in: header
+      name: X-Signature
+      description: |
+        HMAC-SHA256 do corpo bruto da requisicao, em hexadecimal minusculo,
+        opcionalmente prefixado por `sha256=`. Exigido quando o backend tem um
+        segredo de assinatura configurado.
+    SessionCookie:
+      type: apiKey
+      in: cookie
+      name: sabemi_session
+
+  schemas:
+    ProcessingStatus:
+      type: string
+      description: |
+        Ciclo de vida de um evento:
+
+        * `PENDENTE`    - persistido, aguardando o worker retirar da fila.
+        * `PROCESSANDO` - um worker reivindicou o item.
+        * `SUCESSO`     - regra de negocio concluida, contrato atualizado.
+        * `ERRO`        - falhou apos esgotar as tentativas.
+        * `INVALIDO`    - reprovado na validacao; nunca foi enfileirado.
+        * `DUPLICADO`   - reentrega de um `id_transacao` ja conhecido.
+      enum: [PENDENTE, PROCESSANDO, SUCESSO, ERRO, INVALIDO, DUPLICADO]
+
+    PaymentWebhookRequest:
+      type: object
+      required: [id_transacao, id_contrato, valor, data_pagamento, status]
+      properties:
+        id_transacao:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Chave de idempotencia. Unico no log de eventos brutos.
+        id_contrato:
+          type: string
+          minLength: 1
+          maxLength: 128
+        valor:
+          type: number
+          exclusiveMinimum: 0
+          description: Valor liquidado. Persistido como decimal(18,2).
+        data_pagamento:
+          type: string
+          format: date-time
+          description: Data/hora da liquidacao, ISO-8601. Nao pode ser futura.
+        status:
+          type: string
+          enum: [PAGO, PENDENTE, CANCELADO, ESTORNADO]
+          description: Situacao informada pelo banco parceiro.
+      example:
+        id_transacao: TRX-2026-0001
+        id_contrato: CTR-88231
+        valor: 1249.90
+        data_pagamento: '2026-09-01T13:45:00Z'
+        status: PAGO
+
+    WebhookAck:
+      type: object
+      required: [id_transacao, status, duplicate, received_at]
+      properties:
+        id_transacao: { type: string }
+        status:
+          $ref: '#/components/schemas/ProcessingStatus'
+        duplicate:
+          type: boolean
+          description: true quando o `id_transacao` ja existia - nada foi reprocessado.
+        received_at: { type: string, format: date-time }
+        message: { type: string }
+
+    PaymentEvent:
+      type: object
+      required:
+        - id
+        - id_transacao
+        - status_processamento
+        - recebido_em
+        - tentativas
+      properties:
+        id: { type: string, format: uuid }
+        id_transacao: { type: string }
+        id_contrato: { type: string, nullable: true }
+        valor: { type: number, nullable: true }
+        data_pagamento: { type: string, format: date-time, nullable: true }
+        status_origem:
+          type: string
+          nullable: true
+          description: O `status` cru enviado pelo banco parceiro.
+        status_processamento:
+          $ref: '#/components/schemas/ProcessingStatus'
+        erro:
+          type: string
+          nullable: true
+          description: Motivo da falha de validacao ou de processamento.
+        recebido_em: { type: string, format: date-time }
+        processado_em: { type: string, format: date-time, nullable: true }
+        tentativas: { type: integer, minimum: 0 }
+
+    PaymentEventDetail:
+      allOf:
+        - $ref: '#/components/schemas/PaymentEvent'
+        - type: object
+          required: [payload_bruto]
+          properties:
+            payload_bruto:
+              type: string
+              description: Corpo exatamente como recebido, para auditoria.
+
+    PaymentEventPage:
+      type: object
+      required: [items, page, page_size, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PaymentEvent'
+        page: { type: integer }
+        page_size: { type: integer }
+        total: { type: integer }
+
+    ContractStatus:
+      type: object
+      required:
+        - id_contrato
+        - valor_total_liquidado
+        - pagamentos_confirmados
+        - situacao
+        - atualizado_em
+      properties:
+        id_contrato: { type: string }
+        valor_total_liquidado: { type: number }
+        pagamentos_confirmados: { type: integer }
+        ultimo_pagamento_em: { type: string, format: date-time, nullable: true }
+        ultima_transacao: { type: string, nullable: true }
+        situacao:
+          type: string
+          enum: [ATIVO, LIQUIDADO, INADIMPLENTE]
+        atualizado_em: { type: string, format: date-time }
+
+    PaymentSummary:
+      type: object
+      required: [total, por_status]
+      properties:
+        total: { type: integer }
+        por_status:
+          type: object
+          additionalProperties: { type: integer }
+          description: Chaves sao valores de `ProcessingStatus`.
+
+    MagicLinkStart:
+      type: object
+      required: [selector, email, email_sent, message]
+      properties:
+        selector:
+          type: string
+          description: Identificador publico do pedido, usado no polling.
+        email: { type: string, format: email }
+        email_sent: { type: boolean }
+        dev_magic_url:
+          type: string
+          nullable: true
+          description: Somente em desenvolvimento; `null` em producao.
+        dev_otp_code:
+          type: string
+          nullable: true
+          description: Somente em desenvolvimento; `null` em producao.
+        message: { type: string }
+
+    LoginStatus:
+      type: object
+      required: [status, authenticated]
+      properties:
+        status:
+          type: string
+          enum: [pending, approved]
+        authenticated: { type: boolean }
+        access_token:
+          type: string
+          nullable: true
+          description: |
+            Presente apenas quando `approved`. Consumido pelo gateway do
+            frontend, que o grava em cookie httpOnly - nunca chega ao browser.
+        expires_in: { type: integer, nullable: true }
+        user:
+          oneOf:
+            - $ref: '#/components/schemas/User'
+            - type: 'null'
+
+    User:
+      type: object
+      required: [id, email]
+      properties:
+        id: { type: string }
+        email: { type: string, format: email }
+        criado_em: { type: string, format: date-time }
+
+    ProblemDetails:
+      type: object
+      description: Formato de erro uniforme nos dois backends (RFC 7807 enxuto).
+      required: [detail]
+      properties:
+        detail:
+          type: string
+          description: Mensagem legivel. O frontend exibe este campo diretamente.
+        code:
+          type: string
+          description: Codigo estavel para tratamento programatico.
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string }
+          description: Erros de validacao por campo.

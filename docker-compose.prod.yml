@@ -1,0 +1,105 @@
+# =============================================================================
+# Sobreposicao de producao.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --no-build
+#
+# O QUE MUDA EM RELACAO AO ARQUIVO BASE
+# -------------------------------------
+#   * Consome IMAGENS publicadas em vez de construir. O artefato que passou nos
+#     testes e exatamente o que roda - nao um novo build feito no servidor.
+#   * O PostgreSQL deixa de expor porta para a maquina hospedeira. Em
+#     desenvolvimento isso ajuda a inspecionar o banco; em producao e superficie
+#     exposta sem necessidade.
+#   * Ambiente Production, o que faz os codigos de login NUNCA aparecerem na
+#     resposta e as mensagens de erro deixarem de expor detalhes internos.
+#   * Segredos passam a ser OBRIGATORIOS: a sintaxe `${VAR:?mensagem}` impede o
+#     compose de subir com o segredo de desenvolvimento.
+#   * Limites de recursos e politica de log, para um container problematico nao
+#     derrubar a maquina nem encher o disco.
+# =============================================================================
+
+services:
+  postgres:
+    # Sem `ports`: apenas a rede interna alcanca o banco.
+    ports: !reset []
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD em producao}
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  api:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_PREFIX:?defina IMAGE_PREFIX}/api:${IMAGE_TAG:-latest}
+    build: !reset null
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+
+      # Falha na subida se ausente. Um segredo de desenvolvimento em producao
+      # significa sessoes forjaveis por qualquer um que leia este repositorio.
+      Jwt__Secret: ${JWT_SECRET:?defina JWT_SECRET com no minimo 32 caracteres}
+      WebhookSecurity__ApiKey: ${WEBHOOK_API_KEY:?defina WEBHOOK_API_KEY}
+      WebhookSecurity__SignatureSecret: ${WEBHOOK_SIGNATURE_SECRET:?defina WEBHOOK_SIGNATURE_SECRET}
+
+      # Em producao a assinatura HMAC passa a ser exigida: a ApiKey sozinha e um
+      # segredo estatico e nao protege o conteudo da mensagem.
+      WebhookSecurity__RequireSignature: "true"
+
+      Auth__PublicBaseUrl: ${API_PUBLIC_URL:?defina API_PUBLIC_URL}
+      Cors__AllowedOrigins__0: ${FRONTEND_PUBLIC_URL:?defina FRONTEND_PUBLIC_URL}
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  worker:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_PREFIX:?defina IMAGE_PREFIX}/worker:${IMAGE_TAG:-latest}
+    build: !reset null
+    environment:
+      DOTNET_ENVIRONMENT: Production
+      Jwt__Secret: ${JWT_SECRET:?defina JWT_SECRET}
+    # Duas replicas por padrao. A fila usa FOR UPDATE SKIP LOCKED, entao elas
+    # consomem em paralelo sem entregar o mesmo item duas vezes.
+    deploy:
+      replicas: ${WORKER_REPLICAS:-2}
+      resources:
+        limits:
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  frontend:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_PREFIX:?defina IMAGE_PREFIX}/frontend:${IMAGE_TAG:-latest}
+    build: !reset null
+    environment:
+      NODE_ENV: production
+      JWT_SECRET: ${JWT_SECRET:?defina JWT_SECRET}
+      WEBHOOK_API_KEY: ${WEBHOOK_API_KEY:?defina WEBHOOK_API_KEY}
+      WEBHOOK_SIGNATURE_SECRET: ${WEBHOOK_SIGNATURE_SECRET:?defina WEBHOOK_SIGNATURE_SECRET}
+      WEBHOOK_REQUIRE_SIGNATURE: "true"
+      BFF_PUBLIC_BASE_URL: ${FRONTEND_PUBLIC_URL:?defina FRONTEND_PUBLIC_URL}
+      # Falha fechada: em producao o servidor nunca devolve link nem codigo OTP
+      # na resposta, qualquer que seja esta variavel. Explicito por clareza.
+      AUTH_EXPOSE_LOGIN_CODES: "false"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

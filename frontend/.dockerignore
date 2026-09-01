@@ -1,0 +1,10 @@
+node_modules
+dist
+.next
+coverage
+generated
+tests
+.env
+.env.local
+*.log
+diag.log

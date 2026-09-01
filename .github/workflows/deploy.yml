@@ -1,0 +1,198 @@
+# =============================================================================
+# Publicacao das imagens e deploy.
+#
+# A ESTRATEGIA
+# ------------
+# O deploy e por IMAGEM, nao por codigo-fonte. O pipeline publica as tres
+# imagens no GitHub Container Registry e o ambiente de destino as consome. Isso
+# tem uma consequencia que importa: o artefato que passou nos testes e
+# exatamente o que vai para producao - nao um novo build feito no servidor, que
+# poderia diferir por uma versao de dependencia resolvida em outro momento.
+#
+# O JOB DE DEPLOY
+# ---------------
+# O passo final e declarado, com o comando real de cada alvo suportado, mas
+# permanece condicionado a existencia dos segredos. Um teste tecnico nao tem um
+# ambiente de producao para receber o deploy; deixar o passo pronto e inerte e
+# mais honesto do que fingir uma publicacao ou omitir a etapa.
+#
+# Para ativar, basta configurar os segredos descritos em README.md.
+# =============================================================================
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      ambiente:
+        description: Ambiente de destino
+        required: true
+        default: staging
+        type: choice
+        options: [staging, production]
+
+concurrency:
+  # Deploys NAO sao cancelados no meio: interromper uma publicacao deixaria o
+  # registro com um conjunto de imagens incompleto.
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # -------------------------------------------------------------- publicacao
+  publicar:
+    name: Publica as imagens
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      matrix:
+        include:
+          - nome: api
+            contexto: ./backend-dotnet
+            build_args: APP_PROJECT=Sabemi.Api
+          - nome: worker
+            contexto: ./backend-dotnet
+            build_args: APP_PROJECT=Sabemi.Worker
+          - nome: frontend
+            contexto: ./frontend
+            build_args: ""
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configura o Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Autentica no GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Calcula as tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.nome }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Constroi e publica
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.contexto }}
+          build-args: ${{ matrix.build_args }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # linux/arm64 alem de amd64: cobre runners Graviton e maquinas Apple
+          # Silicon sem emulacao.
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha,scope=${{ matrix.nome }}
+          cache-to: type=gha,scope=${{ matrix.nome }},mode=max
+          provenance: true
+          sbom: true
+
+  # ------------------------------------------------------------------ deploy
+  implantar:
+    name: Implanta (${{ inputs.ambiente || 'staging' }})
+    runs-on: ubuntu-latest
+    needs: publicar
+    timeout-minutes: 15
+
+    environment:
+      name: ${{ inputs.ambiente || 'staging' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verifica se ha alvo configurado
+        id: alvo
+        run: |
+          if [ -n "${{ secrets.DEPLOY_HOST }}" ]; then
+            echo "configurado=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configurado=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Nenhum alvo de deploy configurado. As imagens foram publicadas no GHCR e podem ser consumidas manualmente - ver README.md."
+          fi
+
+      # Deploy por SSH: o host baixa as imagens recem-publicadas e recria os
+      # servicos. `--no-build` e essencial - a maquina de destino nao compila
+      # nada, ela apenas consome o artefato que passou nos testes.
+      - name: Deploy por SSH
+        if: steps.alvo.outputs.configurado == 'true'
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -e
+            cd ${{ secrets.DEPLOY_PATH }}
+
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --no-build --remove-orphans
+
+            # Remove apenas as imagens orfas; volumes ficam intactos.
+            docker image prune -f
+
+      # Um deploy que sobe mas nao funciona e pior do que um deploy que falha:
+      # o primeiro passa despercebido.
+      - name: Verificacao pos-deploy
+        if: steps.alvo.outputs.configurado == 'true'
+        run: |
+          set -e
+          echo "Aguardando os servicos responderem..."
+
+          for i in $(seq 1 30); do
+            if curl -fsS "${{ secrets.DEPLOY_API_URL }}/health" > /dev/null 2>&1; then
+              echo "API respondendo."
+              break
+            fi
+            if [ "$i" = "30" ]; then
+              echo "::error::A API nao respondeu apos o deploy."
+              exit 1
+            fi
+            sleep 5
+          done
+
+          curl -fsS "${{ secrets.DEPLOY_API_URL }}/health" | grep -q '"backend":"dotnet"'
+          echo "Deploy verificado."
+
+      - name: Resumo
+        run: |
+          {
+            echo "### Imagens publicadas"
+            echo
+            echo '```'
+            echo "${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/api:latest"
+            echo "${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/worker:latest"
+            echo "${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/frontend:latest"
+            echo '```'
+            echo
+            if [ "${{ steps.alvo.outputs.configurado }}" = "true" ]; then
+              echo "Implantado em **${{ inputs.ambiente || 'staging' }}**."
+            else
+              echo "Sem alvo configurado: as imagens estao no GHCR e prontas para consumo."
+              echo "Configure os segredos \`DEPLOY_HOST\`, \`DEPLOY_USER\`, \`DEPLOY_SSH_KEY\`,"
+              echo "\`DEPLOY_PATH\` e \`DEPLOY_API_URL\` para ativar o deploy automatico."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

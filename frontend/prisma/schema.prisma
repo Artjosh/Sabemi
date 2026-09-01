@@ -1,0 +1,218 @@
+// Schema do backend alternativo (VINEXT / BFF).
+//
+// POR QUE PRISMA AQUI E EF CORE LA
+// --------------------------------
+// A especificacao sugeria Prisma. Prisma nao gera cliente para .NET: usa-lo no
+// backend primario exigiria um processo Node intermediario so para acessar o
+// banco a partir do C# - um salto de rede e um ponto de falha a mais, sem ganho
+// algum. O requisito real e demonstrar ORM com migrations, e no .NET isso e EF
+// Core.
+//
+// Em vez de descartar Prisma, ele foi para onde e a escolha natural: o backend
+// alternativo, que roda em TypeScript. Cada implementacao usa o ORM da sua
+// plataforma, e as duas demonstram o mesmo par schema-versionado + migrations.
+//
+// ISOLAMENTO POR SCHEMA
+// ---------------------
+// Este backend e dono do schema `vinext`; o .NET e dono do `dotnet`. Mesma
+// instancia de PostgreSQL, esquemas separados, migrations independentes. Isso
+// evita o problema obvio de dois ORMs disputando as mesmas tabelas (o
+// `migrate` de um veria o schema do outro como deriva a corrigir) e reproduz a
+// regra de que cada serviço e dono dos seus dados.
+//
+// Consequencia visivel na aplicacao: trocar de backend troca tambem o conjunto
+// de dados. Isso e intencional e o dashboard avisa qual backend esta ativo -
+// ver docs/APRESENTACAO.md.
+
+// O cliente e gerado DENTRO do projeto, e nao em `node_modules/.prisma`.
+//
+// Dois motivos. O primeiro e pratico: com pnpm, o node_modules e estrito e o
+// cliente gerado ali nao consegue resolver o proprio runtime
+// (`@prisma/client-runtime-utils`) - falha no primeiro import. O segundo e que
+// esta passou a ser a recomendacao do Prisma 7: o cliente e artefato do
+// projeto, tem tipos que o editor precisa enxergar e nao deve depender do
+// layout interno do gerenciador de pacotes.
+//
+// A pasta e ignorada pelo git e recriada por `pnpm prisma generate`, que roda
+// no `postinstall` - quem clona o repositorio nao precisa saber disso.
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+// A URL de conexao NAO fica aqui. No Prisma 7 ela vive em `prisma.config.ts`
+// (para as migrations) e chega ao cliente por um adapter explicito
+// (`src/server/bff/db.ts`). O schema descreve so o modelo.
+datasource db {
+  provider = "postgresql"
+  schemas  = ["vinext"]
+}
+
+/// Ciclo de vida de um evento. Espelha o enum do backend .NET - os dois
+/// backends respondem o mesmo contrato, entao os valores precisam bater
+/// exatamente.
+enum ProcessingStatus {
+  PENDENTE
+  PROCESSANDO
+  SUCESSO
+  ERRO
+  INVALIDO
+  DUPLICADO
+
+  @@schema("vinext")
+}
+
+enum JobState {
+  PENDENTE
+  PROCESSANDO
+  CONCLUIDO
+  FALHOU
+
+  @@schema("vinext")
+}
+
+enum ContractSituation {
+  ATIVO
+  LIQUIDADO
+  INADIMPLENTE
+
+  @@schema("vinext")
+}
+
+enum LoginRequestStatus {
+  PENDENTE
+  APROVADO
+
+  @@schema("vinext")
+}
+
+/// Log de eventos brutos - uma linha por notificacao recebida.
+///
+/// `idTransacao` e `@unique`: a idempotencia e garantida pelo indice do banco,
+/// nao por verificacao em memoria. Duas reentregas simultaneas produzem uma
+/// insercao e um erro P2002, que o servico traduz em "duplicado".
+model PaymentEvent {
+  id String @id @default(uuid(7))
+
+  /// Chave de idempotencia vinda do banco parceiro.
+  idTransacao String @unique @map("id_transacao") @db.VarChar(128)
+
+  /// Anulaveis porque um payload invalido tambem e persistido - e pode nao
+  /// trazer estes campos.
+  idContrato    String?   @map("id_contrato") @db.VarChar(128)
+  valor         Decimal?  @db.Decimal(18, 2)
+  dataPagamento DateTime? @map("data_pagamento") @db.Timestamptz()
+  statusOrigem  String?   @map("status_origem") @db.VarChar(32)
+
+  statusProcessamento ProcessingStatus @default(PENDENTE) @map("status_processamento")
+
+  /// Motivo da reprovacao na validacao ou da falha no processamento.
+  erro String?
+
+  /// Corpo exatamente como chegou, para auditoria e eventual reprocessamento.
+  payloadBruto Json @map("payload_bruto")
+
+  assinaturaVerificada Boolean @default(false) @map("assinatura_verificada")
+
+  recebidoEm   DateTime  @default(now()) @map("recebido_em") @db.Timestamptz()
+  processadoEm DateTime? @map("processado_em") @db.Timestamptz()
+  tentativas   Int       @default(0)
+
+  job ProcessingJob?
+
+  @@index([idContrato], name: "ix_payment_events_id_contrato")
+  @@index([statusProcessamento, recebidoEm], name: "ix_payment_events_status_recebido")
+  @@map("payment_events")
+  @@schema("vinext")
+}
+
+/// Estado consolidado de um contrato. Chave primaria e o proprio id de negocio.
+model ContractStatus {
+  idContrato String @id @map("id_contrato") @db.VarChar(128)
+
+  valorTotalLiquidado   Decimal   @default(0) @map("valor_total_liquidado") @db.Decimal(18, 2)
+  pagamentosConfirmados Int       @default(0) @map("pagamentos_confirmados")
+  ultimoPagamentoEm     DateTime? @map("ultimo_pagamento_em") @db.Timestamptz()
+  ultimaTransacao       String?   @map("ultima_transacao") @db.VarChar(128)
+
+  situacao     ContractSituation @default(ATIVO)
+  atualizadoEm DateTime          @updatedAt @map("atualizado_em") @db.Timestamptz()
+
+  @@map("contract_statuses")
+  @@schema("vinext")
+}
+
+/// Fila durable de processamento.
+///
+/// Mesmo padrao do backend .NET: o evento e o job sao gravados na mesma
+/// transacao, e o consumo usa `FOR UPDATE SKIP LOCKED`. E o que impede o
+/// trabalho de sumir se o processo cair entre o "202 Accepted" e o fim do
+/// processamento - um `setTimeout` nao daria essa garantia.
+model ProcessingJob {
+  id String @id @default(uuid(7))
+
+  /// Um job por evento.
+  paymentEventId String       @unique @map("payment_event_id")
+  paymentEvent   PaymentEvent @relation(fields: [paymentEventId], references: [id], onDelete: Cascade)
+
+  estado        JobState @default(PENDENTE)
+  tentativas    Int      @default(0)
+  maxTentativas Int      @default(3) @map("max_tentativas")
+
+  /// Implementa o backoff: uma falha empurra esta data para frente.
+  disponivelEm DateTime @default(now()) @map("disponivel_em") @db.Timestamptz()
+
+  /// Quando o lease expira sem conclusao, um varredor devolve o item a fila.
+  reivindicadoEm  DateTime? @map("reivindicado_em") @db.Timestamptz()
+  reivindicadoPor String?   @map("reivindicado_por") @db.VarChar(128)
+
+  ultimoErro String? @map("ultimo_erro")
+
+  criadoEm     DateTime @default(now()) @map("criado_em") @db.Timestamptz()
+  atualizadoEm DateTime @updatedAt @map("atualizado_em") @db.Timestamptz()
+
+  @@index([estado, disponivelEm], name: "ix_processing_jobs_estado_disponivel")
+  @@map("processing_jobs")
+  @@schema("vinext")
+}
+
+/// Pedido de login passwordless com confirmacao cross-device por polling.
+///
+/// `selector` e publico e viaja em cada consulta do polling; os segredos
+/// (magic link e OTP) sao guardados apenas como hash SHA-256, entao um
+/// vazamento do banco nao entrega logins ativos.
+model LoginRequest {
+  id String @id @default(uuid(7))
+
+  /// Identificador publico usado no polling.
+  selector String @unique @db.VarChar(64)
+
+  /// SHA-256 do token do link. Aberto em qualquer dispositivo.
+  magicTokenHash String? @unique @map("magic_token_hash") @db.VarChar(64)
+
+  /// SHA-256 do codigo de 6 digitos.
+  otpCodeHash String? @map("otp_code_hash") @db.VarChar(64)
+
+  otpTentativas Int @default(0) @map("otp_tentativas")
+
+  email  String             @db.VarChar(255)
+  status LoginRequestStatus @default(PENDENTE)
+
+  criadoEm DateTime @default(now()) @map("criado_em") @db.Timestamptz()
+  expiraEm DateTime @map("expira_em") @db.Timestamptz()
+
+  @@index([email], name: "ix_login_requests_email")
+  @@index([expiraEm], name: "ix_login_requests_expira_em")
+  @@map("login_requests")
+  @@schema("vinext")
+}
+
+/// Operador do painel. Sem senha: o primeiro login cria a conta.
+model AppUser {
+  id       String   @id @default(uuid(7))
+  email    String   @unique @db.VarChar(255)
+  criadoEm DateTime @default(now()) @map("criado_em") @db.Timestamptz()
+
+  @@map("users")
+  @@schema("vinext")
+}

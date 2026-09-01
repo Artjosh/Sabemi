@@ -1,0 +1,3 @@
+# Painel administrativo interno: nao deve ser indexado.
+User-agent: *
+Disallow: /

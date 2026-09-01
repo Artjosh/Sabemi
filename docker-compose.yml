@@ -1,0 +1,173 @@
+# =============================================================================
+# Stack completa: PostgreSQL + API .NET + Worker .NET + Frontend/BFF VINEXT.
+#
+#   docker compose up --build
+#
+# A DECISAO DE SEPARACAO
+# ----------------------
+# A pergunta nao e "quantos containers cabem", e sim "onde a separacao paga o
+# proprio custo". Aqui ela paga em tres fronteiras:
+#
+#   1. API x WORKER - a fronteira mais importante do projeto. A task exige que a
+#      regra pesada (~2s) nao bloqueie o webhook. Separar em processos torna isso
+#      estrutural e nao apenas assincrono: a API nunca gasta CPU com a regra, os
+#      dois lados escalam de forma independente (`--scale worker=3`), e derrubar
+#      o worker para um deploy nao derruba a ingestao - os eventos se acumulam na
+#      fila e sao processados quando ele volta.
+#
+#   2. BACKEND x FRONTEND/BFF - sao implementacoes concorrentes do mesmo
+#      contrato, em plataformas diferentes. Precisam subir, cair e escalar
+#      separadamente para que a troca signifique alguma coisa.
+#
+#   3. BANCO - stateful, com volume proprio e ciclo de vida distinto do codigo.
+#
+# O que NAO foi separado, e por que: nao ha gateway/reverse proxy dedicado (o
+# route handler do VINEXT ja e o gateway same-origin), nem broker de mensagens
+# (a fila e uma tabela, o que permite gravar evento e job na mesma transacao -
+# ver Sabemi.Domain/Entities/ProcessingJob.cs), nem um container so para rodar
+# migrations (cada backend aplica as suas na subida, o que mantem o `up` como
+# unico comando).
+# =============================================================================
+
+name: sabemi-webhooks
+
+services:
+  # ---------------------------------------------------------------- postgres
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sabemi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sabemi}
+      POSTGRES_DB: ${POSTGRES_DB:-sabemi}
+    ports:
+      # Exposto para inspecionar o banco durante a demonstracao. Em producao
+      # esta linha sai: so a rede interna precisa alcancar o PostgreSQL.
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # Os demais servicos aguardam este healthcheck. Sem ele, a API tentaria
+      # migrar contra um banco que ainda esta inicializando.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sabemi} -d ${POSTGRES_DB:-sabemi}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # --------------------------------------------------------------- api .NET
+  api:
+    build:
+      context: ./backend-dotnet
+      args:
+        APP_PROJECT: Sabemi.Api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      ConnectionStrings__Postgres: >-
+        Host=postgres;Port=5432;Database=${POSTGRES_DB:-sabemi};Username=${POSTGRES_USER:-sabemi};Password=${POSTGRES_PASSWORD:-sabemi}
+
+      # SO A API migra o schema `dotnet`. O worker espera. Duas instancias
+      # migrando em paralelo disputam o lock de migration do EF Core.
+      Database__MigrateOnStartup: "true"
+
+      Jwt__Secret: ${JWT_SECRET:-troque-este-segredo-em-producao-com-no-minimo-32-caracteres}
+      Auth__PublicBaseUrl: ${API_PUBLIC_URL:-http://localhost:8080}
+
+      WebhookSecurity__ApiKey: ${WEBHOOK_API_KEY:-sabemi-dev-api-key}
+      WebhookSecurity__SignatureSecret: ${WEBHOOK_SIGNATURE_SECRET:-sabemi-dev-signature-secret}
+      WebhookSecurity__RequireSignature: ${WEBHOOK_REQUIRE_SIGNATURE:-false}
+
+      Cors__AllowedOrigins__0: ${FRONTEND_PUBLIC_URL:-http://localhost:3000}
+    ports:
+      - "${API_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ------------------------------------------------------------ worker .NET
+  worker:
+    build:
+      context: ./backend-dotnet
+      args:
+        APP_PROJECT: Sabemi.Worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        # Espera a API terminar as migrations. O worker tem a propria espera
+        # (ver Sabemi.Worker/Program.cs), mas comecar na ordem certa evita
+        # dezenas de linhas de "aguardando o schema" no log da primeira subida.
+        condition: service_healthy
+    environment:
+      DOTNET_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      ConnectionStrings__Postgres: >-
+        Host=postgres;Port=5432;Database=${POSTGRES_DB:-sabemi};Username=${POSTGRES_USER:-sabemi};Password=${POSTGRES_PASSWORD:-sabemi}
+
+      Database__MigrateOnStartup: "false"
+
+      Jwt__Secret: ${JWT_SECRET:-troque-este-segredo-em-producao-com-no-minimo-32-caracteres}
+
+      # A regra pesada exigida pela task. Este e o tempo que o webhook NAO paga.
+      Processing__SimulatedWorkDuration: ${PROCESSING_SIMULATED_WORK:-00:00:02}
+      Processing__BatchSize: ${PROCESSING_BATCH_SIZE:-10}
+      Processing__MaxTentativas: ${PROCESSING_MAX_ATTEMPTS:-3}
+
+    # Sem `ports`: o worker nao atende requisicao alguma. Ele so consome a fila.
+    #
+    # Escale com:  docker compose up -d --scale worker=3
+    # As replicas nao brigam pelos mesmos itens - a reivindicacao usa
+    # FOR UPDATE SKIP LOCKED (ver Infrastructure/Queue/PostgresJobQueue.cs).
+
+  # --------------------------------------------------- frontend + BFF VINEXT
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+
+      # O backend VINEXT e dono do schema `vinext`; o entrypoint aplica as
+      # migrations dele antes de servir.
+      DATABASE_URL: >-
+        postgresql://${POSTGRES_USER:-sabemi}:${POSTGRES_PASSWORD:-sabemi}@postgres:5432/${POSTGRES_DB:-sabemi}?schema=vinext
+
+      # Como o SERVIDOR do VINEXT alcanca o backend .NET. Nome de servico, nao
+      # localhost: quem faz esta chamada e o container, nao o browser.
+      DOTNET_API_URL: http://api:8080
+
+      # Base publica para montar o link de confirmacao do e-mail - precisa ser
+      # alcancavel pelo NAVEGADOR, inclusive de outro aparelho.
+      BFF_PUBLIC_BASE_URL: ${FRONTEND_PUBLIC_URL:-http://localhost:3000}
+
+      # O mesmo segredo da API: e o que permite ao gateway aceitar uma sessao
+      # emitida por qualquer um dos dois backends.
+      JWT_SECRET: ${JWT_SECRET:-troque-este-segredo-em-producao-com-no-minimo-32-caracteres}
+
+      WEBHOOK_API_KEY: ${WEBHOOK_API_KEY:-sabemi-dev-api-key}
+      WEBHOOK_SIGNATURE_SECRET: ${WEBHOOK_SIGNATURE_SECRET:-sabemi-dev-signature-secret}
+      WEBHOOK_REQUIRE_SIGNATURE: ${WEBHOOK_REQUIRE_SIGNATURE:-false}
+
+      PROCESSING_SIMULATED_WORK_MS: ${PROCESSING_SIMULATED_WORK_MS:-2000}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/bff/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  postgres_data:
+    driver: local

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Configuracao de cobertura do backend .NET.
+
+  O que entra na conta: apenas o codigo que carrega decisao (dominio, casos de
+  uso, persistencia e endpoints). As exclusoes abaixo nao existem para inflar o
+  numero, e sim para ele significar alguma coisa.
+
+  Migrations: codigo GERADO pelo EF Core a partir do modelo. Conta-las como
+  linhas testaveis distorceria a metrica em milhares de linhas de DDL
+  automatico. Elas sao exercitadas de verdade pelos testes de integracao, que
+  aplicam o migrate num PostgreSQL real antes de rodar.
+
+  Program.cs da API: composicao do host (registro de servicos e middleware).
+  Tambem e exercitado ponta a ponta pelos testes de integracao, que sobem a
+  aplicacao; medir linha a linha ali seria medir configuracao, nao logica.
+
+  O limiar de 80% e verificado no pipeline, que falha abaixo dele.
+-->
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat code coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+
+          <Exclude>[Sabemi.Api]Program,[Sabemi.Worker]Program,[*]Sabemi.Infrastructure.Migrations.*</Exclude>
+
+          <ExcludeByFile>**/Migrations/*.cs</ExcludeByFile>
+
+          <ExcludeByAttribute>Obsolete,GeneratedCodeAttribute,CompilerGeneratedAttribute,ExcludeFromCodeCoverageAttribute</ExcludeByAttribute>
+
+          <SingleHit>false</SingleHit>
+          <UseSourceLink>true</UseSourceLink>
+          <IncludeTestAssembly>false</IncludeTestAssembly>
+          <SkipAutoProps>true</SkipAutoProps>
+          <DeterministicReport>false</DeterministicReport>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>
