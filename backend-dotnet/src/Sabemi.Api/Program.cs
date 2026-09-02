@@ -160,6 +160,15 @@ var app = builder.Build();
 // provedor de e-mail, mas nunca deve passar despercebido: se esta configuracao
 // for promovida a um ambiente real, o aviso esta no log de inicializacao. Aqui e
 // nao antes do Build(): so a partir deste ponto o logger do host esta de pe.
+// Qual provedor de e-mail esta ativo. Sem esta linha, a diferenca entre "o
+// e-mail falhou" e "nunca houve provedor configurado" so apareceria depois de
+// alguem pedir acesso e nao receber nada.
+app.Logger.LogInformation(
+    string.IsNullOrWhiteSpace(app.Configuration["Brevo:ApiKey"])
+        ? "E-mail de acesso: SEM provedor configurado (o link vai para o log). Defina BREVO_API_KEY para enviar de verdade."
+        : "E-mail de acesso: Brevo, remetente {Remetente}.",
+    app.Configuration["Brevo:SenderEmail"] ?? "(nao configurado)");
+
 if (app.Environment.IsProduction()
     && app.Configuration.GetValue<bool?>("Auth:ExposeLoginCodesInDevelopment") == true)
 {

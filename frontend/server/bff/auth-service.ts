@@ -3,6 +3,7 @@ import type { LoginStatusDto, MagicLinkStartDto, UserDto } from "@/lib/contracts
 import { bffConfig } from "./config";
 import { uuidV7 } from "./ids";
 import { prisma } from "./db";
+import { enviarEmailDeAcesso } from "./brevo";
 import {
   fixedTimeEquals,
   generateOtp,
@@ -99,10 +100,23 @@ export async function startLogin(rawEmail: unknown): Promise<AuthResult<MagicLin
   const base = bffConfig.auth.publicBaseUrl.replace(/\/$/, "");
   const magicUrl = `${base}/api/bff/auth/confirm?token=${encodeURIComponent(magicToken)}`;
 
-  // Nao ha envio real de e-mail: o teste tecnico precisa rodar com um
-  // `docker compose up` e nada mais. O link vai para o log do servidor e, em
-  // desenvolvimento, tambem para a tela.
+  // O link vai para o log SEMPRE, inclusive quando o e-mail e enviado de
+  // verdade. Custa nada e e a diferenca entre um suporte de dois minutos e um de
+  // meia hora quando alguem diz "nao recebi".
   console.info(`[bff-auth] ACESSO ${email} | link: ${magicUrl} | OTP: ${otpCode}`);
+
+  // O envio e AGUARDADO, e nao disparado em segundo plano.
+  //
+  // Sem esperar, `email_sent` seria um chute e a tela nao teria como escolher
+  // entre "confira seu e-mail" e "use o codigo abaixo". Uma promessa errada aqui
+  // manda o usuario procurar um e-mail que nunca vai chegar - e o timeout curto
+  // (10s) existe justamente para que essa espera tenha teto.
+  //
+  // Uma falha NAO invalida o pedido: ele continua no banco, o polling continua
+  // funcionando, e o link esta no log.
+  const emailEnviado = bffConfig.brevo.apiKey
+    ? await enviarEmailDeAcesso(email, magicUrl, otpCode)
+    : false;
 
   const expoe = bffConfig.auth.exposeLoginCodes;
 
@@ -111,12 +125,17 @@ export async function startLogin(rawEmail: unknown): Promise<AuthResult<MagicLin
     value: {
       selector,
       email,
-      email_sent: false,
+      email_sent: emailEnviado,
       dev_magic_url: expoe ? magicUrl : null,
       dev_otp_code: expoe ? otpCode : null,
-      message: expoe
-        ? "Use o link ou o codigo abaixo para entrar."
-        : "Nao foi possivel enviar o e-mail agora. Tente novamente em instantes.",
+      // Os textos sao os MESMOS do backend .NET (AuthService.StartAsync): a tela
+      // de login e uma so, e a mensagem nao deveria mudar conforme o backend
+      // selecionado.
+      message: emailEnviado
+        ? "Enviamos um link e um codigo de acesso para o seu e-mail."
+        : expoe
+          ? "Use o link ou o codigo abaixo para entrar."
+          : "Nao foi possivel enviar o e-mail agora. Tente novamente em instantes.",
     },
   };
 }

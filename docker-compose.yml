@@ -67,8 +67,14 @@ services:
         condition: service_healthy
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
-      ConnectionStrings__Postgres: >-
-        Host=postgres;Port=5432;Database=${POSTGRES_DB:-postgres};Username=${APP_DB_USER:-sabemi_app};Password=${APP_DB_PASSWORD:-sabemi};Search Path=sabemi
+      # A MESMA variavel do backend VINEXT. O .NET aceita URL desde
+      # PostgresConnectionString: apontar a stack para um Supabase remoto e
+      # trocar esta linha no `.env`, e nao transcrever a mesma informacao em duas
+      # sintaxes diferentes (uma para cada backend).
+      #
+      # O default aponta para o servico `postgres` desta stack. Definindo
+      # DATABASE_URL no `.env`, ela vence - e e assim que se aponta para remoto.
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${APP_DB_USER:-sabemi_app}:${APP_DB_PASSWORD:-sabemi}@postgres:5432/${POSTGRES_DB:-postgres}}
 
       # SO A API migra o schema `dotnet`. O worker espera. Duas instancias
       # migrando em paralelo disputam o lock de migration do EF Core.
@@ -76,6 +82,16 @@ services:
 
       Jwt__Secret: ${JWT_SECRET:-troque-este-segredo-em-producao-com-no-minimo-32-caracteres}
       Auth__PublicBaseUrl: ${API_PUBLIC_URL:-http://localhost:8080}
+
+      # E-mail de acesso pela Brevo. A MESMA conta que o backend VINEXT usa: o
+      # e-mail e o mesmo produto, venha de qual backend vier, e duas contas
+      # dariam duas reputacoes de envio a cuidar.
+      #
+      # Chave vazia = sem envio real, e o link de acesso vai para o log. E o que
+      # permite avaliar o projeto sem uma conta na Brevo.
+      Brevo__ApiKey: ${BREVO_API_KEY:-}
+      Brevo__SenderEmail: ${BREVO_SENDER_EMAIL:-nao-responda@sabemi.com.br}
+      Brevo__SenderName: ${BREVO_SENDER_NAME:-Sabemi}
 
       # Tracing. Sem endpoint configurado, o tracing nao sobe; `/metrics`
       # continua de pe de qualquer forma.
@@ -120,8 +136,14 @@ services:
         condition: service_healthy
     environment:
       DOTNET_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
-      ConnectionStrings__Postgres: >-
-        Host=postgres;Port=5432;Database=${POSTGRES_DB:-postgres};Username=${APP_DB_USER:-sabemi_app};Password=${APP_DB_PASSWORD:-sabemi};Search Path=sabemi
+      # A MESMA variavel do backend VINEXT. O .NET aceita URL desde
+      # PostgresConnectionString: apontar a stack para um Supabase remoto e
+      # trocar esta linha no `.env`, e nao transcrever a mesma informacao em duas
+      # sintaxes diferentes (uma para cada backend).
+      #
+      # O default aponta para o servico `postgres` desta stack. Definindo
+      # DATABASE_URL no `.env`, ela vence - e e assim que se aponta para remoto.
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${APP_DB_USER:-sabemi_app}:${APP_DB_PASSWORD:-sabemi}@postgres:5432/${POSTGRES_DB:-postgres}}
 
       Database__MigrateOnStartup: "false"
 
@@ -183,8 +205,7 @@ services:
       #
       # Sem `?schema=`: o Prisma qualifica cada tabela pelo `@@schema` do modelo,
       # e o driver `pg` interpretava esse parametro como o USUARIO da conexao.
-      DATABASE_URL: >-
-        postgresql://${APP_DB_USER:-sabemi_app}:${APP_DB_PASSWORD:-sabemi}@postgres:5432/${POSTGRES_DB:-postgres}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${APP_DB_USER:-sabemi_app}:${APP_DB_PASSWORD:-sabemi}@postgres:5432/${POSTGRES_DB:-postgres}}
 
       # Como o SERVIDOR do VINEXT alcanca o backend .NET. Nome de servico, nao
       # localhost: quem faz esta chamada e o container, nao o browser.
@@ -203,6 +224,12 @@ services:
       WEBHOOK_REQUIRE_SIGNATURE: ${WEBHOOK_REQUIRE_SIGNATURE:-false}
 
       PROCESSING_SIMULATED_WORK_MS: ${PROCESSING_SIMULATED_WORK_MS:-2000}
+
+      # E-mail de acesso pela Brevo - a MESMA conta e o MESMO remetente da API
+      # .NET. Chave vazia = sem envio real, e o link vai para o log.
+      BREVO_API_KEY: ${BREVO_API_KEY:-}
+      BREVO_SENDER_EMAIL: ${BREVO_SENDER_EMAIL:-nao-responda@sabemi.com.br}
+      BREVO_SENDER_NAME: ${BREVO_SENDER_NAME:-Sabemi}
 
       # Tracing. Sem endpoint configurado, o tracing nao sobe e a stack continua
       # funcionando sem um coletor no ar.

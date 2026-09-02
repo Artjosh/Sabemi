@@ -68,6 +68,38 @@ export const bffConfig = {
     publicBaseUrl: env("BFF_PUBLIC_BASE_URL", "http://localhost:3000"),
   },
 
+  /**
+   * Envio do e-mail de acesso pela Brevo.
+   *
+   * A MESMA conta que o backend .NET usa: o e-mail de acesso e o mesmo produto,
+   * venha de qual backend vier. Duas contas dariam duas reputacoes de envio a
+   * cuidar e um remetente que muda conforme quem atendeu.
+   *
+   * Chave vazia desliga o envio real - e o que permite avaliar o projeto sem
+   * uma conta na Brevo, com o link indo para o log e para a tela.
+   */
+  brevo: {
+    apiKey: env("BREVO_API_KEY", ""),
+
+    /**
+     * Precisa ser um endereco de um dominio VERIFICADO na conta. A Brevo recusa
+     * o envio com 400 caso contrario, e a mensagem de erro dela nao deixa isso
+     * obvio.
+     */
+    senderEmail: env("BREVO_SENDER_EMAIL", "nao-responda@sabemi.com.br"),
+    senderName: env("BREVO_SENDER_NAME", "Sabemi"),
+
+    /** Configuravel para os testes apontarem para um servidor local. */
+    baseUrl: env("BREVO_BASE_URL", "https://api.brevo.com"),
+
+    /**
+     * 10s. Quem espera e o usuario, olhando a tela de login: uma espera longa e
+     * indistinguivel de uma pagina travada. Estourado o prazo, o backend
+     * registra a falha e a UI oferece o link direto.
+     */
+    timeoutMs: envInt("BREVO_TIMEOUT_MS", 10_000),
+  },
+
   processing: {
     maxTentativas: envInt("PROCESSING_MAX_ATTEMPTS", 3),
     baseRetryDelayMs: envInt("PROCESSING_BASE_RETRY_DELAY_MS", 5_000),

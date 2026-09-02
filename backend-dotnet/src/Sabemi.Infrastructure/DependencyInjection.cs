@@ -8,6 +8,8 @@ using Sabemi.Application.Payments;
 using Sabemi.Infrastructure.Persistence;
 using Sabemi.Infrastructure.Queue;
 using Sabemi.Infrastructure.Security;
+using Microsoft.Extensions.Options;
+using Sabemi.Infrastructure.Email;
 
 namespace Sabemi.Infrastructure;
 
@@ -45,18 +47,23 @@ public static class DependencyInjection
                       "Jwt:Secret e obrigatorio e deve ter ao menos 32 caracteres.")
             .ValidateOnStart();
 
-        var connectionString = configuration.GetConnectionString("Postgres")
+        // A MESMA variavel que o backend VINEXT usa. Ver PostgresConnectionString:
+        // apontar a stack para um Supabase remoto passa a ser trocar uma linha, em
+        // vez de transcrever a mesma informacao em duas sintaxes diferentes.
+        var connectionString = PostgresConnectionString.Resolver(configuration)
             ?? throw new InvalidOperationException(
-                "ConnectionStrings:Postgres nao configurada. Defina-a no appsettings ou na variavel " +
-                "ConnectionStrings__Postgres.");
+                "Conexao do PostgreSQL nao configurada. Defina DATABASE_URL " +
+                "(postgresql://usuario:senha@host:porta/banco) ou, para usar o formato " +
+                "nativo do Npgsql, ConnectionStrings__Postgres.");
 
         services.AddDbContext<SabemiDbContext>(opt =>
         {
             opt.UseNpgsql(connectionString, npgsql =>
             {
-                // A tabela de historico fica no mesmo schema do resto: o schema
-                // dotnet e autocontido e pode ser descartado inteiro sem tocar no
-                // schema do backend VINEXT.
+                // A tabela de historico fica no mesmo schema do resto. O schema
+                // `sabemi` e COMPARTILHADO com o backend VINEXT, e o EF Core e o
+                // unico dono das migrations - o Prisma apenas descreve o mesmo
+                // modelo para poder consultar (ver frontend/prisma/schema.prisma).
                 npgsql.MigrationsHistoryTable("__EFMigrationsHistory", SabemiDbContext.Schema);
 
                 // Resiliencia a falhas transitorias de conexao - reinicio do
@@ -72,7 +79,42 @@ public static class DependencyInjection
         services.AddSingleton<IClock, SystemClock>();
         services.AddScoped<ITokenIssuer, JwtTokenIssuer>();
         services.AddScoped<IPaymentBusinessRule, SimulatedPaymentBusinessRule>();
-        services.AddSingleton<ILoginNotificationSender, LoggingLoginNotificationSender>();
+        // Entrega do e-mail de acesso: Brevo quando ha chave, log quando nao ha.
+        //
+        // A decisao e feita AQUI, na subida, e nao dentro do remetente. Um
+        // remetente que checasse a chave a cada envio esconderia a configuracao
+        // ausente no meio do fluxo de login - e a diferenca entre "o e-mail
+        // falhou" e "nunca houve provedor configurado" e exatamente o que quem
+        // opera precisa saber. Aqui a escolha aparece no log da inicializacao.
+        services.AddOptions<BrevoOptions>()
+            .Bind(configuration.GetSection(BrevoOptions.SectionName))
+            .ValidateOnStart();
+
+        var brevo = new BrevoOptions();
+        configuration.GetSection(BrevoOptions.SectionName).Bind(brevo);
+
+        if (brevo.Configurado)
+        {
+            // `AddHttpClient` e nao um `new HttpClient()`: a fabrica cuida da
+            // reciclagem do handler, sem a qual uma instancia de longa duracao
+            // ignora mudanca de DNS - e a Brevo esta atras de um balanceador.
+            services.AddHttpClient<ILoginNotificationSender, BrevoLoginNotificationSender>(
+                (sp, cliente) =>
+                {
+                    var o = sp.GetRequiredService<IOptions<BrevoOptions>>().Value;
+
+                    cliente.BaseAddress = new Uri(o.BaseUrl);
+                    cliente.Timeout = o.Timeout;
+
+                    // `api-key` e o header da Brevo - nao e `Authorization`.
+                    cliente.DefaultRequestHeaders.Add("api-key", o.ApiKey);
+                    cliente.DefaultRequestHeaders.Add("accept", "application/json");
+                });
+        }
+        else
+        {
+            services.AddSingleton<ILoginNotificationSender, LoggingLoginNotificationSender>();
+        }
 
         services.AddScoped<PaymentIngestionService>();
         services.AddScoped<PaymentQueryService>();
