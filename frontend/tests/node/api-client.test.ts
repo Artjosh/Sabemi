@@ -234,7 +234,7 @@ describe("endpoints de autenticação", () => {
 describe("troca de backend", () => {
   it("switchBackend envia o backend escolhido", async () => {
     const fetchMock = stubFetch(
-      json({ active: "vinext", previous: "dotnet", session_cleared: true }),
+      json({ active: "vinext", previous: "dotnet", session_preserved: true }),
     );
 
     const resultado = await switchBackend("vinext");
@@ -243,7 +243,7 @@ describe("troca de backend", () => {
     expect(JSON.parse(chamadaFetch(fetchMock).init.body as string)).toEqual({
       backend: "vinext",
     });
-    expect(resultado.session_cleared).toBe(true);
+    expect(resultado.session_preserved).toBe(true);
   });
 
   it("getHealth passa pelo gateway, e não direto no backend", async () => {

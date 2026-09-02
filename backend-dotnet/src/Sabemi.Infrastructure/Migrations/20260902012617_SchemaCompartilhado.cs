@@ -6,17 +6,17 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Sabemi.Infrastructure.Migrations
 {
     /// <inheritdoc />
-    public partial class InitialSchema : Migration
+    public partial class SchemaCompartilhado : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.EnsureSchema(
-                name: "dotnet");
+                name: "sabemi");
 
             migrationBuilder.CreateTable(
                 name: "contract_statuses",
-                schema: "dotnet",
+                schema: "sabemi",
                 columns: table => new
                 {
                     id_contrato = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: false),
@@ -35,7 +35,7 @@ namespace Sabemi.Infrastructure.Migrations
 
             migrationBuilder.CreateTable(
                 name: "login_requests",
-                schema: "dotnet",
+                schema: "sabemi",
                 columns: table => new
                 {
                     id = table.Column<Guid>(type: "uuid", nullable: false),
@@ -55,7 +55,7 @@ namespace Sabemi.Infrastructure.Migrations
 
             migrationBuilder.CreateTable(
                 name: "payment_events",
-                schema: "dotnet",
+                schema: "sabemi",
                 columns: table => new
                 {
                     id = table.Column<Guid>(type: "uuid", nullable: false),
@@ -79,7 +79,7 @@ namespace Sabemi.Infrastructure.Migrations
 
             migrationBuilder.CreateTable(
                 name: "users",
-                schema: "dotnet",
+                schema: "sabemi",
                 columns: table => new
                 {
                     id = table.Column<Guid>(type: "uuid", nullable: false),
@@ -93,7 +93,7 @@ namespace Sabemi.Infrastructure.Migrations
 
             migrationBuilder.CreateTable(
                 name: "processing_jobs",
-                schema: "dotnet",
+                schema: "sabemi",
                 columns: table => new
                 {
                     id = table.Column<Guid>(type: "uuid", nullable: false),
@@ -114,7 +114,7 @@ namespace Sabemi.Infrastructure.Migrations
                     table.ForeignKey(
                         name: "FK_processing_jobs_payment_events_payment_event_id",
                         column: x => x.payment_event_id,
-                        principalSchema: "dotnet",
+                        principalSchema: "sabemi",
                         principalTable: "payment_events",
                         principalColumn: "id",
                         onDelete: ReferentialAction.Cascade);
@@ -122,65 +122,65 @@ namespace Sabemi.Infrastructure.Migrations
 
             migrationBuilder.CreateIndex(
                 name: "ix_login_requests_email",
-                schema: "dotnet",
+                schema: "sabemi",
                 table: "login_requests",
                 column: "email");
 
             migrationBuilder.CreateIndex(
                 name: "ix_login_requests_expira_em",
-                schema: "dotnet",
+                schema: "sabemi",
                 table: "login_requests",
                 column: "expira_em");
 
             migrationBuilder.CreateIndex(
                 name: "ux_login_requests_magic_token_hash",
-                schema: "dotnet",
+                schema: "sabemi",
                 table: "login_requests",
                 column: "magic_token_hash",
                 unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "ux_login_requests_selector",
-                schema: "dotnet",
+                schema: "sabemi",
                 table: "login_requests",
                 column: "selector",
                 unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "ix_payment_events_id_contrato",
-                schema: "dotnet",
+                schema: "sabemi",
                 table: "payment_events",
                 column: "id_contrato");
 
             migrationBuilder.CreateIndex(
                 name: "ix_payment_events_status_recebido",
-                schema: "dotnet",
+                schema: "sabemi",
                 table: "payment_events",
                 columns: new[] { "status_processamento", "recebido_em" });
 
             migrationBuilder.CreateIndex(
                 name: "ux_payment_events_id_transacao",
-                schema: "dotnet",
+                schema: "sabemi",
                 table: "payment_events",
                 column: "id_transacao",
                 unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "ix_processing_jobs_estado_disponivel",
-                schema: "dotnet",
+                schema: "sabemi",
                 table: "processing_jobs",
                 columns: new[] { "estado", "disponivel_em" });
 
             migrationBuilder.CreateIndex(
                 name: "ux_processing_jobs_payment_event_id",
-                schema: "dotnet",
+                schema: "sabemi",
                 table: "processing_jobs",
                 column: "payment_event_id",
                 unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "ux_users_email",
-                schema: "dotnet",
+                schema: "sabemi",
                 table: "users",
                 column: "email",
                 unique: true);
@@ -191,23 +191,23 @@ namespace Sabemi.Infrastructure.Migrations
         {
             migrationBuilder.DropTable(
                 name: "contract_statuses",
-                schema: "dotnet");
+                schema: "sabemi");
 
             migrationBuilder.DropTable(
                 name: "login_requests",
-                schema: "dotnet");
+                schema: "sabemi");
 
             migrationBuilder.DropTable(
                 name: "processing_jobs",
-                schema: "dotnet");
+                schema: "sabemi");
 
             migrationBuilder.DropTable(
                 name: "users",
-                schema: "dotnet");
+                schema: "sabemi");
 
             migrationBuilder.DropTable(
                 name: "payment_events",
-                schema: "dotnet");
+                schema: "sabemi");
         }
     }
 }

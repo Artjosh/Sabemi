@@ -40,20 +40,41 @@ public sealed class PostgresJobQueue(
     {
         var agora = clock.UtcNow;
 
-        // Um comando so: seleciona-e-marca. O SELECT interno segura as travas ate
-        // o fim do statement, entao nenhuma outra replica ve estas linhas como
-        // pendentes.
-        const string sql = """
-            UPDATE dotnet.processing_jobs AS j
-               SET estado            = 'Processando',
+        // Interpolados, nao parametrizados: sao nomes de membros do enum
+        // definidos em codigo, nunca entrada externa - nao ha superficie de
+        // injecao aqui. E `SqlQueryRaw` reserva `{0}`/`{1}`/`{2}` para os
+        // parametros de verdade (agora, workerId, batchSize).
+        var Pendente = JobState.Pendente.ToString().ToUpperInvariant();
+        var Processando = JobState.Processando.ToString().ToUpperInvariant();
+
+        // O schema vem da constante, e nao de um literal: SQL bruto nao respeita
+        // o `Search Path` da string de conexao, e uma mudanca de schema aqui e
+        // invisivel para o compilador. Quando ele passou de `dotnet` para
+        // `sabemi`, estas duas linhas foram o unico ponto que nao quebrou o
+        // build - so a suite de integracao denunciou.
+        //
+        // `$$"""` e nao `$"""`: com dois cifroes a interpolacao exige `{{ }}`, e
+        // os `{0}`/`{1}`/`{2}` - placeholders posicionais do SqlQueryRaw -
+        // permanecem literais. Com um cifrao so eles virariam interpolacao e a
+        // consulta receberia a constante `0` em vez do parametro.
+        //
+        // Os estados tambem vem do enum, e nao de literais escritos a mao. Eles
+        // ja foram literais: quando a gravacao passou a ser em MAIUSCULAS (ver
+        // EnumEmMaiusculas), o `WHERE estado = 'Pendente'` deixou de encontrar
+        // qualquer linha - a fila parou de reivindicar e nao houve erro algum,
+        // so trabalho que nunca acontecia. Derivando do enum, uma renomeacao
+        // futura quebra o build em vez de silenciar a fila.
+        var sql = $$"""
+            UPDATE {{Persistence.SabemiDbContext.Schema}}.processing_jobs AS j
+               SET estado            = '{{Processando}}',
                    tentativas        = j.tentativas + 1,
                    reivindicado_em   = {0},
                    reivindicado_por  = {1},
                    atualizado_em     = {0}
               FROM (
                     SELECT id
-                      FROM dotnet.processing_jobs
-                     WHERE estado = 'Pendente'
+                      FROM {{Persistence.SabemiDbContext.Schema}}.processing_jobs
+                     WHERE estado = '{{Pendente}}'
                        AND disponivel_em <= {0}
                      ORDER BY disponivel_em, criado_em
                      LIMIT {2}

@@ -93,6 +93,27 @@ jobs:
       - name: Portao de cobertura (minimo ${{ env.COVERAGE_MIN }}%)
         run: python scripts/check-coverage.py TestResults --min ${{ env.COVERAGE_MIN }}
 
+      # `backend-dotnet/schema.sql` e versionado porque quem trabalha no
+      # frontend precisa criar o banco de teste sem ter o SDK do .NET instalado
+      # (ver frontend/scripts/setup-test-db.mjs). Um arquivo versionado que
+      # ninguem verifica envelhece em silencio: no dia em que alguem adiciona
+      # uma migration e esquece de regenera-lo, a suite do frontend passa a
+      # rodar contra um schema que nao existe mais.
+      - name: Instala as ferramentas locais (dotnet-ef)
+        run: dotnet tool restore
+
+      - name: O schema.sql versionado esta atualizado?
+        run: |
+          dotnet ef migrations script --idempotent             --project src/Sabemi.Infrastructure             --startup-project src/Sabemi.Infrastructure             --output /tmp/schema-regerado.sql
+
+          # `--strip-trailing-cr` porque o arquivo versionado nasce no Windows.
+          if ! diff --strip-trailing-cr -q schema.sql /tmp/schema-regerado.sql; then
+            echo "::error::schema.sql esta desatualizado. Regenere com:"
+            echo "  cd backend-dotnet && dotnet tool restore && dotnet ef migrations script --idempotent --project src/Sabemi.Infrastructure --startup-project src/Sabemi.Infrastructure --output schema.sql"
+            diff --strip-trailing-cr schema.sql /tmp/schema-regerado.sql | head -40
+            exit 1
+          fi
+
       - name: Publica os artefatos de teste
         if: always()
         uses: actions/upload-artifact@v4
@@ -111,9 +132,10 @@ jobs:
       run:
         working-directory: frontend
 
-    # O backend VINEXT tem banco proprio (schema `vinext`) e os testes rodam
-    # contra PostgreSQL de verdade - e o unico jeito de exercitar o indice unico
-    # que garante a idempotencia e o SKIP LOCKED que move a fila.
+    # Os testes rodam contra PostgreSQL de verdade - e o unico jeito de exercitar
+    # o indice unico que garante a idempotencia e o SKIP LOCKED que move a fila.
+    # O schema e o `sabemi`, o mesmo do backend .NET: e o compartilhamento que
+    # faz um evento entregue a um backend aparecer no painel do outro.
     services:
       postgres:
         image: postgres:17-alpine
@@ -130,7 +152,7 @@ jobs:
           --health-retries 10
 
     env:
-      DATABASE_URL: postgresql://sabemi:sabemi@localhost:5432/sabemi_test?schema=vinext
+      DATABASE_URL: postgresql://sabemi:sabemi@localhost:5432/sabemi_test
       JWT_SECRET: segredo-de-teste-com-mais-de-32-caracteres-aqui
       WEBHOOK_API_KEY: chave-de-teste
       WEBHOOK_SIGNATURE_SECRET: segredo-de-teste
@@ -154,11 +176,23 @@ jobs:
       - name: Gera o cliente do Prisma
         run: pnpm prisma generate
 
-      # O `pretest` tambem faz isto, mas rodar antes do typecheck garante que um
-      # schema desatualizado apareca como erro de migration, e nao como uma
-      # falha de teste confusa.
-      - name: Aplica as migrations
-        run: pnpm prisma migrate deploy
+      # NAO ha `prisma migrate deploy` aqui, e isso e deliberado: nao existe
+      # pasta de migrations do Prisma. Quem cria e evolui o schema `sabemi` e o
+      # EF Core; o Prisma apenas o DESCREVE para poder consultar. Duas
+      # ferramentas emitindo DDL para as mesmas tabelas produziriam exatamente o
+      # tipo de divergencia silenciosa que o passo de drift abaixo existe para
+      # impedir.
+      #
+      # O que este passo aplica e `backend-dotnet/schema.sql`, gerado pelo EF
+      # Core e verificado no job do .NET.
+      - name: Prepara o banco de teste (schema do EF Core)
+        run: pnpm db:test:setup
+
+      # O modelo do Prisma descreve o mesmo schema que o EF Core cria. Se as
+      # duas descricoes divergirem, o backend VINEXT le colunas que nao existem
+      # - e o erro so apareceria em runtime, no container, longe da causa.
+      - name: O modelo do Prisma corresponde ao banco?
+        run: pnpm db:check
 
       - name: Verificacao de tipos
         run: pnpm typecheck

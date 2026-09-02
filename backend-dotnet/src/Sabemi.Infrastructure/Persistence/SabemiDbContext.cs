@@ -8,12 +8,16 @@ namespace Sabemi.Infrastructure.Persistence;
 /// Contexto EF Core do backend .NET.
 /// </summary>
 /// <remarks>
-/// <para><b>Sobre o schema.</b> Tudo vive no schema <c>dotnet</c> do PostgreSQL,
-/// nao no <c>public</c>. O backend alternativo em VINEXT tem o seu proprio
-/// (<c>vinext</c>, migrado pelo Prisma). Cada implementacao e dona do seu
-/// esquema e das suas migrations: e o que permite ter dois ORMs na mesma
-/// instancia de banco sem que um sobrescreva as migrations do outro, e reflete a
-/// regra de "cada serviço e dono dos seus dados".</para>
+/// <para><b>Um schema para os DOIS backends.</b> Tudo vive em <c>sabemi</c>, e
+/// o backend VINEXT le e escreve nas MESMAS tabelas. E o que permite trocar de
+/// backend sem perder os dados nem refazer o login: os dois enxergam os mesmos
+/// pagamentos e os mesmos usuarios.</para>
+///
+/// <para><b>Quem e dono das migrations.</b> O EF Core, sozinho. O Prisma
+/// descreve o mesmo modelo mas nao migra - se os dois migrassem, cada um veria
+/// as tabelas do outro como deriva a corrigir e tentaria destrui-las. A
+/// divergencia entre os dois modelos e detectada no CI por
+/// <c>prisma migrate diff</c>, entao ela nao pode passar despercebida.</para>
 ///
 /// <para><b>Sobre ORM.</b> A especificacao sugeria Prisma. Prisma nao gera
 /// cliente para .NET - integra-lo exigiria um processo Node so para acessar o
@@ -25,7 +29,7 @@ namespace Sabemi.Infrastructure.Persistence;
 public sealed class SabemiDbContext(DbContextOptions<SabemiDbContext> options)
     : DbContext(options), IAppDbContext
 {
-    public const string Schema = "dotnet";
+    public const string Schema = "sabemi";
 
     public DbSet<PaymentEvent> PaymentEvents => Set<PaymentEvent>();
     public DbSet<ContractStatus> ContractStatuses => Set<ContractStatus>();

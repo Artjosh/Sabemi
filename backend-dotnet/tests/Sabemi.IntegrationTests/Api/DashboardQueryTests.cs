@@ -361,27 +361,66 @@ public class AuthExpiryTests(PostgresFixture postgres) : IAsyncLifetime
         (await auth.PollAsync(recente.Value!.Selector)).Ok.ShouldBeTrue();
     }
 
-    [Fact]
-    public async Task Em_producao_os_codigos_NUNCA_aparecem_na_resposta()
-    {
-        // Falha fechada: a decisao e do servidor e nenhuma configuracao a
-        // contorna em producao.
-        await using var db = postgres.CreateDbContext();
-
-        var auth = new AuthService(
+    /// <summary>
+    /// Monta o servico com a opcao de exposicao em um estado especifico.
+    /// </summary>
+    private AuthService MontarComExposicao(SabemiDbContext db, bool producao, bool? expor)
+        => new(
             db, new FakeClock(T0), new TokenFalso(), new NotificadorSilencioso(),
             Options.Create(new AuthOptions
             {
-                IsProduction = true,
-                // Ligado de proposito: o ambiente tem de vencer esta opcao.
-                ExposeLoginCodesInDevelopment = true,
+                IsProduction = producao,
+                ExposeLoginCodesInDevelopment = expor,
             }),
             NullLogger<AuthService>.Instance);
+
+    [Fact]
+    public async Task Em_producao_o_padrao_e_nao_expor_os_codigos()
+    {
+        // Falha fechada: sem configuracao explicita, producao nao entrega link
+        // nem OTP no corpo da resposta. Este e o caminho que qualquer deploy
+        // percorre sem que ninguem precise decidir nada.
+        await using var db = postgres.CreateDbContext();
+        var auth = MontarComExposicao(db, producao: true, expor: null);
 
         var inicio = await auth.StartAsync("producao@sabemi.com.br");
 
         inicio.Value!.DevMagicUrl.ShouldBeNull();
         inicio.Value.DevOtpCode.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Fora_de_producao_o_padrao_e_expor_os_codigos()
+    {
+        // O outro lado do mesmo padrao: em desenvolvimento a demonstracao roda
+        // sem provedor de e-mail.
+        await using var db = postgres.CreateDbContext();
+        var auth = MontarComExposicao(db, producao: false, expor: null);
+
+        var inicio = await auth.StartAsync("dev@sabemi.com.br");
+
+        inicio.Value!.DevMagicUrl.ShouldNotBeNullOrWhiteSpace();
+        inicio.Value.DevOtpCode.ShouldNotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task Uma_escolha_explicita_vence_o_ambiente_nos_dois_sentidos()
+    {
+        // A saida existe porque travar em `!IsProduction` deixava uma imagem de
+        // producao sem provedor de e-mail SEM NENHUM caminho de login. Quem
+        // opera precisa poder dizer "esta stack e uma demonstracao" - e tambem
+        // poder desligar a exposicao numa maquina de desenvolvimento que ja
+        // tenha e-mail configurado.
+        await using var db = postgres.CreateDbContext();
+
+        var emProducaoLigado = MontarComExposicao(db, producao: true, expor: true);
+        var ligado = await emProducaoLigado.StartAsync("demo-em-producao@sabemi.com.br");
+        ligado.Value!.DevMagicUrl.ShouldNotBeNullOrWhiteSpace();
+
+        var foraDeProducaoDesligado = MontarComExposicao(db, producao: false, expor: false);
+        var desligado = await foraDeProducaoDesligado.StartAsync("dev-com-email@sabemi.com.br");
+        desligado.Value!.DevMagicUrl.ShouldBeNull();
+        desligado.Value.DevOtpCode.ShouldBeNull();
     }
 
     private static string ExtrairToken(string magicUrl)

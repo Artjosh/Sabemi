@@ -40,6 +40,29 @@ export const PROCESSING_STATUSES: readonly ProcessingStatus[] = [
 /** Identificador do backend ativo. */
 export type BackendId = "dotnet" | "vinext";
 
+/** Natureza da falha - decide se o sistema retenta sozinho. */
+export type FailureCategory = "TRANSITORIA" | "PERMANENTE" | "DESCONHECIDA";
+
+/**
+ * Falha traduzida para quem opera o painel.
+ *
+ * Vem do BACKEND, e nao de um catalogo aqui no cliente, de proposito: os dois
+ * backends implementam o mesmo contrato e precisam explicar a mesma falha com as
+ * mesmas palavras. Um catalogo duplicado na UI divergiria na primeira vez que so
+ * um dos lados fosse atualizado.
+ */
+export interface FailureDiagnosisDto {
+  categoria: FailureCategory;
+  /** Codigo estavel da causa - tambem usado como rotulo de metrica. */
+  codigo: string;
+  /** Uma frase dizendo o que deu errado, sem stack trace. */
+  explicacao: string;
+  /** O que a pessoa pode fazer a respeito. */
+  acao_sugerida: string;
+  /** O sistema retenta sozinho? `false` justifica oferecer o reenfileiramento. */
+  retentavel: boolean;
+}
+
 export interface PaymentEventDto {
   id: string;
   id_transacao: string;
@@ -48,10 +71,23 @@ export interface PaymentEventDto {
   data_pagamento: string | null;
   status_origem: string | null;
   status_processamento: ProcessingStatus;
+  /** Mensagem tecnica crua, como veio da excecao. */
   erro: string | null;
+  /** Leitura da falha para a UI. Nulo quando o evento nunca falhou. */
+  diagnostico: FailureDiagnosisDto | null;
   recebido_em: string;
   processado_em: string | null;
   tentativas: number;
+}
+
+/** Resposta do reenfileiramento manual. */
+export interface RequeueResultDto {
+  id_transacao: string;
+  /** PENDENTE - o evento voltou para a fila. */
+  status_processamento: ProcessingStatus;
+  reenfileirado_em: string;
+  /** Texto pronto para mostrar ao operador. */
+  message: string;
 }
 
 export interface PaymentEventDetailDto extends PaymentEventDto {

@@ -4,6 +4,14 @@
   "private": true,
   "packageManager": "pnpm@10.33.0",
   "dependencies": {
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/exporter-prometheus": "^0.222.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.222.0",
+    "@opentelemetry/instrumentation-pg": "^0.74.0",
+    "@opentelemetry/resources": "^2.11.0",
+    "@opentelemetry/sdk-metrics": "^2.11.0",
+    "@opentelemetry/sdk-node": "^0.222.0",
+    "@opentelemetry/semantic-conventions": "^1.43.0",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "@radix-ui/react-dialog": "^1.1.23",
@@ -59,10 +67,11 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
-    "db:deploy": "prisma migrate deploy",
     "postinstall": "prisma generate",
     "db:test:setup": "node scripts/setup-test-db.mjs",
-    "pretest": "node scripts/setup-test-db.mjs"
+    "pretest": "node scripts/setup-test-db.mjs",
+    "pretest:coverage": "node scripts/setup-test-db.mjs",
+    "db:check": "prisma migrate diff --config prisma.config.diff.ts --from-schema prisma/schema.prisma --to-config-datasource --exit-code",
+    "db:pull": "prisma db pull --url \"$DATABASE_URL\""
   }
 }

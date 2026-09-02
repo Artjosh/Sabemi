@@ -79,15 +79,11 @@ export async function POST(request: NextRequest) {
 
   jar.set(BACKEND_COOKIE, body.backend, backendCookieOptions());
 
-  // Sessao emitida pelo backend anterior nao vale no novo - ver acima.
-  const sessaoEncerrada = anterior !== body.backend && jar.has(SESSION_COOKIE);
-  if (sessaoEncerrada) {
-    jar.delete(SESSION_COOKIE);
-  }
-
+  // O cookie de sessao permanece: os dois backends compartilham os usuarios e
+  // assinam com o mesmo segredo. Ver a explicacao acima.
   return NextResponse.json({
     active: body.backend,
     previous: anterior,
-    session_cleared: sessaoEncerrada,
+    session_preserved: jar.has(SESSION_COOKIE),
   });
 }

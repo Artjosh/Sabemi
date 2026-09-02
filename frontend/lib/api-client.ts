@@ -9,6 +9,7 @@ import type {
   PaymentFilters,
   PaymentSummaryDto,
   ProblemDetails,
+  RequeueResultDto,
   UserDto,
 } from "./contracts";
 
@@ -151,9 +152,15 @@ export function getBackends() {
   return request<{ active: BackendId; default: BackendId; backends: BackendInfo[] }>("/api/backend");
 }
 
-/** Troca o backend ativo. A sessao e encerrada quando o backend muda. */
+/**
+ * Troca o backend ativo.
+ *
+ * A sessao CONTINUA valendo: os dois backends compartilham o schema `sabemi`,
+ * portanto os mesmos usuarios, e assinam com o mesmo segredo. O operador troca
+ * de implementacao e segue exatamente onde estava.
+ */
 export function switchBackend(backend: BackendId) {
-  return request<{ active: BackendId; previous: BackendId; session_cleared: boolean }>(
+  return request<{ active: BackendId; previous: BackendId; session_preserved: boolean }>(
     "/api/backend",
     { method: "POST", body: JSON.stringify({ backend }) },
   );
@@ -185,6 +192,20 @@ export function getPaymentSummary() {
 export function getPaymentDetail(idTransacao: string) {
   return request<PaymentEventDetailDto>(
     `/api/gateway/payments/${encodeURIComponent(idTransacao)}`,
+  );
+}
+
+/**
+ * Devolve a fila um evento que falhou.
+ *
+ * Erros esperados chegam como `ApiError`: 409 quando o estado do evento nao
+ * permite (ja processado, ja na fila, invalido) - e a mensagem do 409 e escrita
+ * para ser mostrada ao operador tal como veio.
+ */
+export function requeuePayment(idTransacao: string) {
+  return request<RequeueResultDto>(
+    `/api/gateway/payments/${encodeURIComponent(idTransacao)}/reenfileirar`,
+    { method: "POST" },
   );
 }
 

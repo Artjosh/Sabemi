@@ -435,10 +435,11 @@ describe("seletor /api/backend", () => {
     expect(jar.store.get("sabemi_backend")?.value).toBe("vinext");
   });
 
-  it("a troca ENCERRA a sessão - cada backend tem seus próprios usuários", async () => {
-    // A decisão que mantém a troca honesta: o `sub` do JWT aponta para um
-    // usuário que o outro backend não conhece.
-    jar.set("sabemi_session", "sessao-do-dotnet");
+  it("a troca PRESERVA a sessão - os dois backends compartilham os usuários", async () => {
+    // A consequência de compartilhar o schema `sabemi`: o `sub` do JWT aponta
+    // para um usuário que os DOIS enxergam, e os dois assinam com o mesmo
+    // segredo. O operador troca de implementação e continua onde estava.
+    jar.set("sabemi_session", "sessao-valida-nos-dois");
 
     const { POST } = await import("@/app/api/backend/route");
     const resposta = await POST(
@@ -448,14 +449,16 @@ describe("seletor /api/backend", () => {
       }),
     );
 
-    expect(await resposta.json()).toMatchObject({ session_cleared: true });
-    expect(jar.has("sabemi_session")).toBe(false);
+    expect(await resposta.json()).toMatchObject({
+      active: "vinext",
+      session_preserved: true,
+    });
+    expect(jar.has("sabemi_session")).toBe(true);
+    // E o valor e o MESMO: nao foi reemitido, apenas preservado.
+    expect(jar.store.get("sabemi_session")?.value).toBe("sessao-valida-nos-dois");
   });
 
-  it("selecionar o backend já ativo preserva a sessão", async () => {
-    jar.set("sabemi_backend", "vinext");
-    jar.set("sabemi_session", "sessao-do-vinext");
-
+  it("trocar sem sessão aberta simplesmente troca", async () => {
     const { POST } = await import("@/app/api/backend/route");
     const resposta = await POST(
       req("http://localhost:3000/api/backend", {
@@ -464,8 +467,7 @@ describe("seletor /api/backend", () => {
       }),
     );
 
-    expect(await resposta.json()).toMatchObject({ session_cleared: false });
-    expect(jar.has("sabemi_session")).toBe(true);
+    expect(await resposta.json()).toMatchObject({ session_preserved: false });
   });
 
   it("o cookie de backend é legível pelo cliente", async () => {

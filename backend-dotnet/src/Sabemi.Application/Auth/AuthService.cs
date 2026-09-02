@@ -24,11 +24,14 @@ public sealed class AuthOptions
     public TimeSpan SessionTtl { get; set; } = TimeSpan.FromHours(24);
 
     /// <summary>
-    /// Devolve link e OTP no corpo da resposta, para a demonstracao rodar sem
-    /// SMTP. Ignorado quando <see cref="IsProduction"/> - ver
-    /// <see cref="ExposeLoginCodes"/>.
+    /// Devolve link e OTP no corpo da resposta, em vez de so por e-mail.
+    /// <para>
+    /// Quando <c>null</c> (o padrao) a decisao acompanha o ambiente: ligado fora
+    /// de producao, desligado em producao. Um valor explicito vale nos dois
+    /// sentidos - ver <see cref="ExposeLoginCodes"/>.
+    /// </para>
     /// </summary>
-    public bool ExposeLoginCodesInDevelopment { get; set; } = true;
+    public bool? ExposeLoginCodesInDevelopment { get; set; }
 
     /// <summary>Preenchido pelo host a partir do ambiente.</summary>
     public bool IsProduction { get; set; }
@@ -37,11 +40,23 @@ public sealed class AuthOptions
     public string PublicBaseUrl { get; set; } = "http://localhost:8080";
 
     /// <summary>
-    /// Decisao final sobre expor os segredos, e ela falha fechada: em producao e
-    /// sempre <c>false</c>, independentemente da configuracao. Vive no servidor e
-    /// nenhum campo da requisicao a influencia.
+    /// Decisao final sobre expor link e OTP na resposta. Falha fechada por
+    /// padrao, com uma saida explicita.
+    /// <para>
+    /// A versao anterior travava em <c>!IsProduction</c>, e isso era um beco sem
+    /// saida: uma imagem de producao sem provedor de e-mail ficava sem NENHUM
+    /// caminho de login - o usuario pedia acesso, recebia <c>null</c> e nao havia
+    /// como entrar. Quem opera precisa poder dizer "esta stack e uma
+    /// demonstracao, entregue o codigo na resposta".
+    /// </para>
+    /// <para>
+    /// Ligar em producao e uma decisao consciente e ruidosa: exige
+    /// <c>Auth:ExposeLoginCodesInDevelopment=true</c> escrito a mao, e o host
+    /// registra um aviso na inicializacao. <c>docker-compose.prod.yml</c> fixa
+    /// <c>false</c>. Nenhum campo da requisicao influencia esta propriedade.
+    /// </para>
     /// </summary>
-    public bool ExposeLoginCodes => !IsProduction && ExposeLoginCodesInDevelopment;
+    public bool ExposeLoginCodes => ExposeLoginCodesInDevelopment ?? !IsProduction;
 }
 
 /// <summary>Motivos pelos quais um passo do login pode falhar.</summary>

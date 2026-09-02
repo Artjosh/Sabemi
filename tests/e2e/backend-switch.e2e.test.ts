@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   API_KEY,
   API_URL,
+  BACKENDS,
   Cliente,
   WEB_URL,
   aguardarAte,
@@ -128,110 +129,115 @@ describe("a troca muda quem responde", () => {
     expect(devolta.body.backend).toBe("dotnet");
   });
 
-  it("a troca encerra a sessão — cada backend tem seus próprios usuários", async () => {
+  it("a sessão SOBREVIVE à troca — sem refazer login", async () => {
+    // O comportamento que o schema compartilhado torna possível: os dois
+    // backends enxergam os mesmos usuários e assinam com o mesmo segredo.
     const cliente = navegador();
 
     await cliente.post("/api/backend", { backend: "dotnet" });
-    await autenticar(cliente, "troca");
+    const usuario = await autenticar(cliente, "sessao-sobrevive");
 
-    expect(cliente.jar.tem("sabemi_session")).toBe(true);
+    const cookieAntes = cliente.jar.valor("sabemi_session");
+    expect(cookieAntes).toBeTruthy();
     expect((await cliente.get("/api/gateway/payments")).status).toBe(200);
 
-    // Troca de backend.
-    const troca = await cliente.post<{ session_cleared: boolean }>("/api/backend", {
+    const troca = await cliente.post<{ session_preserved: boolean }>("/api/backend", {
       backend: "vinext",
     });
 
-    expect(troca.body.session_cleared).toBe(true);
-    expect(cliente.jar.tem("sabemi_session")).toBe(false);
+    expect(troca.body.session_preserved).toBe(true);
 
-    // A sessão antiga não vale no novo backend.
-    expect((await cliente.get("/api/gateway/payments")).status).toBe(401);
+    // O MESMO cookie continua ali - não foi reemitido, apenas preservado.
+    expect(cliente.jar.valor("sabemi_session")).toBe(cookieAntes);
+
+    // E dá acesso ao dashboard no OUTRO backend, sem novo login.
+    const noOutro = await cliente.get("/api/gateway/payments");
+    expect(noOutro.status).toBe(200);
+    expect(noOutro.headers.get("x-sabemi-backend")).toBe("vinext");
+
+    // E é o mesmo usuário.
+    const sessao = await cliente.get<{ user: { id: string; email: string } }>(
+      "/api/auth/session",
+    );
+    expect(sessao.status).toBe(200);
+    expect(sessao.body.user.id).toBe(usuario.id);
+    expect(sessao.body.user.email).toBe(usuario.email);
   });
 
-  it("selecionar o backend já ativo preserva a sessão", async () => {
+  it("o usuário é o MESMO nos dois backends", async () => {
+    // Consequência direta do schema compartilhado - e o oposto do que acontecia
+    // quando cada backend tinha o próprio banco.
     const cliente = navegador();
 
     await cliente.post("/api/backend", { backend: "dotnet" });
-    await autenticar(cliente, "mesma");
-
-    const troca = await cliente.post<{ session_cleared: boolean }>("/api/backend", {
-      backend: "dotnet",
-    });
-
-    expect(troca.body.session_cleared).toBe(false);
-    expect((await cliente.get("/api/gateway/payments")).status).toBe(200);
-  });
-
-  it("o usuário criado em um backend não existe no outro", async () => {
-    // Consequência direta de bancos separados - e a prova de que não são duas
-    // fachadas sobre o mesmo armazenamento.
-    const cliente = navegador();
-
-    await cliente.post("/api/backend", { backend: "dotnet" });
-    const noDotnet = await autenticar(cliente, "usuario");
+    const noDotnet = await autenticar(cliente, "usuario-unico");
 
     await cliente.post("/api/backend", { backend: "vinext" });
-    const noVinext = await autenticar(cliente, "usuario");
+    const noVinext = await cliente.get<{ user: { id: string } }>("/api/auth/session");
 
-    // Mesmo fluxo, identificadores diferentes: são registros de bancos distintos.
-    expect(noDotnet.id).not.toBe(noVinext.id);
+    expect(noVinext.status).toBe(200);
+    expect(noVinext.body.user.id).toBe(noDotnet.id);
   });
 });
 
 describe("a troca muda os DADOS, não só a rota", () => {
-  it("um evento gravado em um backend não aparece no outro", async () => {
-    // O teste que torna impossível fingir a troca com um backend só.
-    const soNoDotnet = pagamento({ valor: 11.11 });
-    const soNoVinext = pagamento({ valor: 22.22 });
+  it("um evento entregue a um backend é visível pelo OUTRO", async () => {
+    // A propriedade que o schema compartilhado entrega: a troca muda a
+    // IMPLEMENTAÇÃO, e não os dados.
+    const peloDotnet = pagamento({ valor: 11.11 });
+    const peloVinext = pagamento({ valor: 22.22 });
 
-    expect((await entregarEm("dotnet", soNoDotnet)).status).toBe(202);
-    expect((await entregarEm("vinext", soNoVinext)).status).toBe(202);
+    expect((await entregarEm("dotnet", peloDotnet)).status).toBe(202);
+    expect((await entregarEm("vinext", peloVinext)).status).toBe(202);
 
-    // ---- Olhando pelo .NET.
+    // ---- Olhando pelo .NET: enxerga os dois.
     const noDotnet = await comBackend("dotnet");
 
-    const dotnetVeOProprio = await noDotnet.get<EventoDto>(
-      `/api/gateway/payments/${encodeURIComponent(soNoDotnet.id_transacao)}`,
-    );
-    const dotnetVeODoOutro = await noDotnet.get(
-      `/api/gateway/payments/${encodeURIComponent(soNoVinext.id_transacao)}`,
-    );
+    expect(
+      (await noDotnet.get<EventoDto>(
+        `/api/gateway/payments/${encodeURIComponent(peloDotnet.id_transacao)}`,
+      )).status,
+    ).toBe(200);
+    expect(
+      (await noDotnet.get(
+        `/api/gateway/payments/${encodeURIComponent(peloVinext.id_transacao)}`,
+      )).status,
+    ).toBe(200);
 
-    expect(dotnetVeOProprio.status).toBe(200);
-    expect(dotnetVeODoOutro.status).toBe(404);
-
-    // ---- Olhando pelo VINEXT.
+    // ---- Olhando pelo VINEXT: também enxerga os dois.
     const noVinext = await comBackend("vinext");
 
-    const vinextVeOProprio = await noVinext.get<EventoDto>(
-      `/api/gateway/payments/${encodeURIComponent(soNoVinext.id_transacao)}`,
-    );
-    const vinextVeODoOutro = await noVinext.get(
-      `/api/gateway/payments/${encodeURIComponent(soNoDotnet.id_transacao)}`,
-    );
-
-    expect(vinextVeOProprio.status).toBe(200);
-    expect(vinextVeODoOutro.status).toBe(404);
+    expect(
+      (await noVinext.get<EventoDto>(
+        `/api/gateway/payments/${encodeURIComponent(peloVinext.id_transacao)}`,
+      )).status,
+    ).toBe(200);
+    expect(
+      (await noVinext.get(
+        `/api/gateway/payments/${encodeURIComponent(peloDotnet.id_transacao)}`,
+      )).status,
+    ).toBe(200);
   });
 
-  it("o mesmo id_transacao pode existir nos dois — são bancos independentes", async () => {
-    // A idempotência é por backend, e é o comportamento correto: um índice único
-    // do schema `dotnet` não tem por que restringir o schema `vinext`.
+  it("a idempotência vale ENTRE os backends", async () => {
+    // Consequência importante do índice único compartilhado: uma reentrega que
+    // chega pelo OUTRO backend também é recusada. Com bancos separados, o mesmo
+    // pagamento seria processado duas vezes - uma de cada lado.
     const evento = pagamento({ valor: 33.33 });
 
-    const noDotnet = await entregarEm("dotnet", evento);
-    const noVinext = await entregarEm("vinext", evento);
+    const primeira = await entregarEm("dotnet", evento);
+    expect(primeira.status).toBe(202);
+    expect(primeira.body.duplicate).toBe(false);
 
-    // Os dois aceitam como NOVO.
-    expect(noDotnet.status).toBe(202);
-    expect(noVinext.status).toBe(202);
-    expect(noDotnet.body.duplicate).toBe(false);
-    expect(noVinext.body.duplicate).toBe(false);
+    // A MESMA transação, agora entregue ao outro backend.
+    const segunda = await entregarEm("vinext", evento);
+    expect(segunda.status).toBe(200);
+    expect(segunda.body.duplicate).toBe(true);
 
-    // Mas dentro de cada um, a reentrega é rejeitada.
-    expect((await entregarEm("dotnet", evento)).status).toBe(200);
-    expect((await entregarEm("vinext", evento)).status).toBe(200);
+    // E vice-versa.
+    const outro = pagamento({ valor: 44.44 });
+    expect((await entregarEm("vinext", outro)).status).toBe(202);
+    expect((await entregarEm("dotnet", outro)).status).toBe(200);
   });
 });
 
@@ -322,12 +328,13 @@ describe("os dois backends cumprem o mesmo contrato", () => {
 
 describe("ORM e persistência em ambos os backends", () => {
   it.each([
-    { id: "dotnet" as const, orm: "EF Core", schema: "dotnet" },
-    { id: "vinext" as const, orm: "Prisma", schema: "vinext" },
-  ])("$orm persiste e consulta no schema $schema", async ({ id }) => {
-    // Cada backend tem seu próprio ORM e seu próprio schema. O que se verifica
-    // aqui é o ciclo completo de persistência: gravar pelo webhook, processar
-    // e ler de volta pelo dashboard, com os valores decimais intactos.
+    { id: "dotnet" as const, orm: "EF Core" },
+    { id: "vinext" as const, orm: "Prisma" },
+  ])("$orm persiste e consulta no schema compartilhado", async ({ id }) => {
+    // Cada backend tem seu próprio ORM, mas os dois escrevem no MESMO schema
+    // `sabemi` - é isso que faz o dado aparecer nos dois sem novo login. O que
+    // se verifica aqui é o ciclo completo de persistência: gravar pelo webhook,
+    // processar e ler de volta pelo dashboard, com os decimais intactos.
     const evento = pagamento({ valor: 4321.99 });
 
     expect((await entregarEm(id, evento)).status).toBe(202);
@@ -358,5 +365,133 @@ describe("ORM e persistência em ambos os backends", () => {
     );
     expect(contrato.status).toBe(200);
     expect(contrato.body.valor_total_liquidado).toBe(4321.99);
+  });
+});
+
+describe("reenfileiramento manual", () => {
+  // O botao do painel chama este endpoint. Aqui ele e exercitado pelo gateway,
+  // nos DOIS backends, com os mesmos casos - porque o painel e um so e o
+  // operador nao pode receber respostas diferentes conforme o backend ativo.
+
+  it.each(BACKENDS)(
+    "$nome recusa reenfileirar um evento que já teve SUCESSO",
+    async ({ id }) => {
+      // A proteção mais importante deste endpoint. A idempotência da ingestão
+      // impede um evento DUPLICADO de entrar - ela não impede o MESMO evento de
+      // ser processado duas vezes. Sem esta recusa, dois cliques dobrariam o
+      // valor liquidado do contrato.
+      const evento = pagamento({ valor: 111.11 });
+
+      expect((await entregarEm(id, evento)).status).toBe(202);
+
+      const cliente = await comBackend(id);
+
+      await aguardarAte(`o evento ser processado pelo backend ${id}`, async () => {
+        const r = await cliente.get<EventoDto>(
+          `/api/gateway/payments/${encodeURIComponent(evento.id_transacao)}`,
+        );
+        return r.status === 200 && r.body.status_processamento === "SUCESSO" ? r.body : null;
+      });
+
+      const recusa = await cliente.request<{ detail: string; code: string }>(
+        `/api/gateway/payments/${encodeURIComponent(evento.id_transacao)}/reenfileirar`,
+        { method: "POST" },
+      );
+
+      // 409, e não 400: o pedido está correto; o que impede é o ESTADO do evento.
+      expect(recusa.status).toBe(409);
+      expect(recusa.body.code).toBe("requeue_not_allowed");
+
+      // A mensagem é mostrada ao operador tal como vem: precisa dizer POR QUE.
+      expect(recusa.body.detail).toContain("somado ao contrato");
+
+      // E o contrato continua com UM pagamento, não dois.
+      const contrato = await cliente.get<{ pagamentos_confirmados: number }>(
+        `/api/gateway/contracts/${encodeURIComponent(evento.id_contrato)}`,
+      );
+      expect(contrato.body.pagamentos_confirmados).toBe(1);
+    },
+  );
+
+  it.each(BACKENDS)("$nome responde 404 para um id_transacao inexistente", async ({ id }) => {
+    const cliente = await comBackend(id);
+
+    const r = await cliente.request<{ code: string }>(
+      "/api/gateway/payments/NAO-EXISTE-JAMAIS/reenfileirar",
+      { method: "POST" },
+    );
+
+    expect(r.status).toBe(404);
+    expect(r.body.code).toBe("payment_event_not_found");
+  });
+
+  it.each(BACKENDS)("$nome exige sessão para reenfileirar", async ({ id }) => {
+    // O endpoint MUTA estado. Deixá-lo aberto permitiria a qualquer um forçar o
+    // reprocessamento de eventos sem nunca ter feito login.
+    const cliente = navegador();
+    await cliente.post("/api/backend", { backend: id });
+
+    const r = await cliente.request("/api/gateway/payments/QUALQUER/reenfileirar", {
+      method: "POST",
+    });
+
+    expect(r.status).toBe(401);
+  });
+});
+
+describe("diagnóstico de falha no contrato da API", () => {
+  it.each(BACKENDS)("$nome explica um payload inválido em português", async ({ id }) => {
+    // O tooltip do painel é montado com estes campos. Se o backend não os
+    // devolvesse, o operador voltaria a ver só a mensagem crua da validação.
+    const invalido = { ...pagamento(), valor: -5 };
+
+    const ack = await entregarEm(id, invalido);
+    expect(ack.status).toBe(400);
+
+    const cliente = await comBackend(id);
+
+    const detalhe = await cliente.get<{
+      status_processamento: string;
+      diagnostico: {
+        categoria: string;
+        codigo: string;
+        explicacao: string;
+        acao_sugerida: string;
+        retentavel: boolean;
+      } | null;
+    }>(`/api/gateway/payments/${encodeURIComponent(invalido.id_transacao as string)}`);
+
+    expect(detalhe.status).toBe(200);
+    expect(detalhe.body.status_processamento).toBe("INVALIDO");
+
+    const d = detalhe.body.diagnostico;
+    expect(d).not.toBeNull();
+    expect(d!.codigo).toBe("PAYLOAD_INVALIDO");
+    expect(d!.categoria).toBe("PERMANENTE");
+
+    // Não é retentável: é isso que faz o painel NÃO oferecer o botão.
+    expect(d!.retentavel).toBe(false);
+
+    // Textos de verdade, não campos vazios - eles vão direto para a tela.
+    expect(d!.explicacao.length).toBeGreaterThan(20);
+    expect(d!.acao_sugerida.length).toBeGreaterThan(20);
+  });
+
+  it.each(BACKENDS)("$nome não inventa diagnóstico para um evento OK", async ({ id }) => {
+    // A UI usa a AUSÊNCIA para decidir se mostra o tooltip. Um diagnóstico
+    // genérico numa linha de sucesso poria um ícone de erro onde não há erro.
+    const evento = pagamento({ valor: 77.77 });
+    expect((await entregarEm(id, evento)).status).toBe(202);
+
+    const cliente = await comBackend(id);
+
+    const pronto = await aguardarAte(`o evento ser processado pelo backend ${id}`, async () => {
+      const r = await cliente.get<{ status_processamento: string; diagnostico: unknown }>(
+        `/api/gateway/payments/${encodeURIComponent(evento.id_transacao)}`,
+      );
+      return r.status === 200 && r.body.status_processamento === "SUCESSO" ? r.body : null;
+    });
+
+    expect(pronto.diagnostico).toBeNull();
   });
 });

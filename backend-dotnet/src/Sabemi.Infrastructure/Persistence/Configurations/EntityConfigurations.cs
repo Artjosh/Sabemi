@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Sabemi.Domain.Entities;
 using Sabemi.Domain.Enums;
+using Sabemi.Domain.Processing;
 
 namespace Sabemi.Infrastructure.Persistence.Configurations;
 
@@ -55,10 +56,24 @@ public sealed class PaymentEventConfiguration : IEntityTypeConfiguration<Payment
         b.Property(e => e.StatusProcessamento)
             .HasColumnName("status_processamento")
             .HasMaxLength(16)
-            .HasConversion<string>()
+            .HasConversion(EnumEmMaiusculas.Para<ProcessingStatus>())
             .IsRequired();
 
         b.Property(e => e.Erro).HasColumnName("erro");
+
+        // A leitura da falha, gravada ao lado da mensagem crua. Enum como texto
+        // pelo mesmo motivo de status_processamento: legivel em consulta ad hoc.
+        b.Property(e => e.ErroCategoria)
+            .HasColumnName("erro_categoria")
+            .HasMaxLength(16)
+            .HasConversion(EnumEmMaiusculas.Para<FailureCategory>());
+
+        // Codigo estavel da causa. So ele e persistido - a explicacao e a acao
+        // sugerida derivam dele no FailureCatalog, entao melhorar um texto do
+        // tooltip nao exige tocar em linha nenhuma da tabela.
+        b.Property(e => e.ErroCodigo)
+            .HasColumnName("erro_codigo")
+            .HasMaxLength(48);
 
         // jsonb em vez de text: permite consultar dentro do payload depois, sem
         // migrar nada. O custo de parse na escrita e desprezivel neste volume.
@@ -79,6 +94,14 @@ public sealed class PaymentEventConfiguration : IEntityTypeConfiguration<Payment
         // situacao e ordena por recebimento decrescente.
         b.HasIndex(e => new { e.StatusProcessamento, e.RecebidoEm })
             .HasDatabaseName("ix_payment_events_status_recebido");
+
+        // Indice parcial: so as linhas com falha. O painel de erros filtra por
+        // categoria, e o volume de eventos com erro e uma fracao pequena do
+        // total - indexar a tabela inteira custaria escrita em todo evento de
+        // sucesso sem servir a consulta alguma.
+        b.HasIndex(e => e.ErroCategoria)
+            .HasDatabaseName("ix_payment_events_erro_categoria")
+            .HasFilter("erro_categoria IS NOT NULL");
     }
 }
 
@@ -111,7 +134,7 @@ public sealed class ContractStatusConfiguration : IEntityTypeConfiguration<Contr
         b.Property(c => c.Situacao)
             .HasColumnName("situacao")
             .HasMaxLength(16)
-            .HasConversion<string>()
+            .HasConversion(EnumEmMaiusculas.Para<ContractSituation>())
             .IsRequired();
 
         b.Property(c => c.AtualizadoEm).HasColumnName("atualizado_em").IsRequired();
@@ -152,7 +175,7 @@ public sealed class ProcessingJobConfiguration : IEntityTypeConfiguration<Proces
         b.Property(j => j.Estado)
             .HasColumnName("estado")
             .HasMaxLength(16)
-            .HasConversion<string>()
+            .HasConversion(EnumEmMaiusculas.Para<JobState>())
             .IsRequired();
 
         b.Property(j => j.Tentativas).HasColumnName("tentativas").IsRequired();
@@ -214,7 +237,7 @@ public sealed class LoginRequestConfiguration : IEntityTypeConfiguration<LoginRe
         b.Property(r => r.Status)
             .HasColumnName("status")
             .HasMaxLength(16)
-            .HasConversion<string>()
+            .HasConversion(EnumEmMaiusculas.Para<LoginRequestStatus>())
             .IsRequired();
 
         b.Property(r => r.CriadoEm).HasColumnName("criado_em").IsRequired();

@@ -19,6 +19,8 @@ import {
   listPayments,
 } from "./payments-service";
 import { ensureWorkerStarted } from "./processing-service";
+import { reenfileirar } from "./requeue-service";
+import { iniciarTelemetria } from "./telemetry-setup";
 
 /**
  * Roteador do backend VINEXT.
@@ -67,11 +69,46 @@ function problem(status: number, detail: string, code?: string, errors?: Record<
 
 const UNAUTHORIZED = () => problem(401, "Sessao ausente ou expirada.", "unauthorized");
 
-/** Despacha uma requisicao para o handler correspondente. */
+/**
+ * Despacha uma requisicao para o handler correspondente.
+ *
+ * Envolve o despacho num tratamento de erro global, equivalente ao
+ * `ExceptionHandlingMiddleware` do backend .NET. Sem ele, uma excecao nao
+ * tratada subia ate o runtime do VINEXT e virava um 500 SEM CORPO E SEM LOG -
+ * o pior modo de falha possivel para diagnosticar, porque nao ha o que ler nem
+ * no cliente nem no servidor.
+ */
 export async function handleBffRequest(request: BffRequest): Promise<BffResponse> {
-  // O laco de processamento sobe junto com o primeiro uso do backend. Nao ha
-  // um "processo de inicializacao" separado num servidor Node sob demanda.
+  try {
+    return await despachar(request);
+  } catch (erro) {
+    const correlacao = crypto.randomUUID();
+
+    console.error(
+      `[bff] Excecao nao tratada em ${request.method} /${request.path}. ` +
+        `Correlacao: ${correlacao}`,
+      erro,
+    );
+
+    // Em producao o cliente recebe apenas a correlacao: a mensagem original
+    // pode carregar nome de tabela, caminho de arquivo ou string de conexao.
+    const detalhe = bffConfig.isProduction
+      ? `Erro interno. Informe a correlacao ${correlacao} ao suporte.`
+      : erro instanceof Error
+        ? erro.message
+        : String(erro);
+
+    return problem(500, detalhe, "internal_error");
+  }
+}
+
+async function despachar(request: BffRequest): Promise<BffResponse> {
+  // O laco de processamento e a telemetria sobem junto com o primeiro uso do
+  // backend. Nao ha um "processo de inicializacao" separado num servidor Node
+  // sob demanda - as duas funcoes sao idempotentes e retornam de imediato a
+  // partir da segunda chamada.
   ensureWorkerStarted();
+  iniciarTelemetria();
 
   const path = request.path.replace(/^\/+|\/+$/g, "");
   const method = request.method.toUpperCase();
@@ -170,6 +207,30 @@ export async function handleBffRequest(request: BffRequest): Promise<BffResponse
     if (!claims) return UNAUTHORIZED();
 
     return { status: 200, body: await getSummary() };
+  }
+
+  // Antes da rota GET generica de `payments/`: aquela captura qualquer sufixo,
+  // entao uma rota mais especifica precisa vir primeiro para ser alcancada.
+  if (path.startsWith("payments/") && path.endsWith("/reenfileirar") && method === "POST") {
+    const claims = await requireSession(request);
+    if (!claims) return UNAUTHORIZED();
+
+    const idTransacao = decodeURIComponent(
+      path.slice("payments/".length, -"/reenfileirar".length),
+    );
+
+    const resultado = await reenfileirar(idTransacao);
+
+    if (resultado.ok) {
+      return { status: 200, body: resultado.value };
+    }
+
+    // 409, e nao 400: o pedido esta correto; o que impede e o ESTADO atual do
+    // evento. Um 400 mandaria quem chama procurar erro no proprio pedido - e a
+    // mensagem do 409 e justamente o que o painel mostra ao operador.
+    return resultado.failure === "not_found"
+      ? problem(404, resultado.message, "payment_event_not_found")
+      : problem(409, resultado.message, "requeue_not_allowed");
   }
 
   if (path.startsWith("payments/") && method === "GET") {

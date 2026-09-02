@@ -59,16 +59,18 @@ ENV NODE_ENV=production \
 COPY --from=build /app/dist/standalone ./dist/standalone
 COPY --from=build /app/public ./public
 
-# As migrations do Prisma e o CLI são necessários em execução: o entrypoint
-# aplica `prisma migrate deploy` antes de servir. É o que garante que o schema
-# `vinext` exista sem um passo manual.
-COPY --from=build /app/prisma ./prisma
-COPY --from=build /app/prisma.config.ts ./prisma.config.ts
-COPY --from=build /app/package.json ./package.json
-COPY --from=build /app/node_modules/.bin/prisma ./node_modules/.bin/prisma
-COPY --from=build /app/node_modules/prisma ./node_modules/prisma
-COPY --from=build /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=build /app/node_modules/.pnpm ./node_modules/.pnpm
+# O CLI do Prisma NAO vem: este container nao migra mais nada. Os dois backends
+# compartilham o schema `sabemi` e quem e dono das migrations e o EF Core - a
+# API as aplica na subida.
+#
+# O driver `pg` e instalado do zero, e nao copiado do estagio de build. Copiar
+# `node_modules/pg` do pnpm traz o pacote mas nao as dependencias dele: o pnpm
+# as guarda em `.pnpm` e liga por symlink, e os links nao sobrevivem ao COPY -
+# o container subia e morria com MODULE_NOT_FOUND em `pg-connection-string`.
+#
+# Ele serve so ao entrypoint, para ESPERAR o schema ficar pronto antes de
+# servir. A aplicacao usa o driver que ja esta no bundle autocontido.
+RUN npm install --no-save --omit=dev pg@8
 
 COPY docker-entrypoint.sh ./
 RUN chmod +x docker-entrypoint.sh

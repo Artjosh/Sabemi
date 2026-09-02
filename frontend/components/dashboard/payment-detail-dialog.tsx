@@ -9,9 +9,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { Alert, Separator, Skeleton, StatusBadge } from "@/components/ui/primitives";
-import { ApiError, getContract, getPaymentDetail } from "@/lib/api-client";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { ApiError, getContract, getPaymentDetail, requeuePayment } from "@/lib/api-client";
 import type { ContractStatusDto, PaymentEventDetailDto } from "@/lib/contracts";
+
+import { FailureTooltip } from "./failure-tooltip";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 
 /**
@@ -41,7 +45,22 @@ export function PaymentDetailDialog({
   const [carregando, setCarregando] = React.useState(false);
   const [erro, setErro] = React.useState<string | null>(null);
 
+  /**
+   * Estado do reenfileiramento. Separado do `erro` da carga: uma recusa do
+   * reenfileiramento nao pode substituir a tela do evento por uma mensagem de
+   * erro - o operador precisa continuar vendo o que estava lendo.
+   */
+  const [reenfileirando, setReenfileirando] = React.useState(false);
+  const [avisoRequeue, setAvisoRequeue] = React.useState<
+    { tom: "success" | "error"; texto: string } | null
+  >(null);
+
   React.useEffect(() => {
+    // O aviso e sempre limpo, inclusive ao reabrir o MESMO evento: um "devolvido
+    // a fila" de minutos atras, ainda na tela, faria o operador crer que acabou
+    // de acontecer.
+    setAvisoRequeue(null);
+
     if (!idTransacao) {
       setEvento(null);
       setContrato(null);
@@ -83,6 +102,42 @@ export function PaymentDetailDialog({
     };
   }, [idTransacao]);
 
+  /**
+   * Devolve o evento a fila e ATUALIZA a tela com o estado novo.
+   *
+   * Recarregar o detalhe em vez de so mostrar "ok" e o que impede o operador de
+   * clicar duas vezes: depois da primeira, o evento ja esta em PENDENTE e o
+   * botao desaparece sozinho.
+   */
+  async function aoReenfileirar() {
+    if (!idTransacao || reenfileirando) return;
+
+    setReenfileirando(true);
+    setAvisoRequeue(null);
+
+    try {
+      const resultado = await requeuePayment(idTransacao);
+      setAvisoRequeue({ tom: "success", texto: resultado.message });
+
+      // Releitura em vez de mutacao local: o estado autoritativo e o do
+      // servidor, e o worker pode ate ja ter comecado a processar.
+      setEvento(await getPaymentDetail(idTransacao));
+    } catch (error) {
+      // A mensagem do 409 e escrita para o operador ("ja foi processado com
+      // sucesso e o valor ja esta somado ao contrato"), entao vai para a tela
+      // como veio.
+      setAvisoRequeue({
+        tom: "error",
+        texto:
+          error instanceof ApiError
+            ? error.message
+            : "Não foi possível reenfileirar o evento.",
+      });
+    } finally {
+      setReenfileirando(false);
+    }
+  }
+
   return (
     <Dialog open={idTransacao !== null} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -117,12 +172,76 @@ export function PaymentDetailDialog({
                 tone={evento.status_processamento === "INVALIDO" ? "warning" : "error"}
                 icon="bi-exclamation-triangle-fill"
               >
-                <p className="font-semibold">
-                  {evento.status_processamento === "INVALIDO"
-                    ? "Reprovado na validação"
-                    : "Falha no processamento"}
-                </p>
-                <p className="mt-1 text-xs">{evento.erro}</p>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <p className="font-semibold">
+                    {evento.status_processamento === "INVALIDO"
+                      ? "Reprovado na validação"
+                      : "Falha no processamento"}
+                  </p>
+
+                  {/* A leitura da falha ao lado do titulo. A mensagem tecnica
+                      continua logo abaixo, inteira: aqui e onde alguem investiga,
+                      e truncar o que ele veio ler seria contraproducente. */}
+                  {evento.diagnostico ? (
+                    <TooltipProvider>
+                      <FailureTooltip diagnostico={evento.diagnostico} />
+                    </TooltipProvider>
+                  ) : null}
+                </div>
+
+                {evento.diagnostico ? (
+                  <p className="mt-2 text-xs">{evento.diagnostico.explicacao}</p>
+                ) : null}
+
+                <p className="mt-2 font-mono text-[11px] opacity-80">{evento.erro}</p>
+
+                {evento.diagnostico ? (
+                  <p className="mt-2 text-xs">
+                    <strong>O que fazer:</strong> {evento.diagnostico.acao_sugerida}
+                  </p>
+                ) : null}
+
+                {/* O botao so aparece em ERRO. Nos demais estados o servidor
+                    recusaria com 409, e oferecer uma acao que sempre falha e
+                    pior do que nao oferecer nenhuma. */}
+                {evento.status_processamento === "ERRO" ? (
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={aoReenfileirar}
+                      disabled={reenfileirando}
+                    >
+                      <i
+                        className={
+                          reenfileirando
+                            ? "bi bi-arrow-repeat animate-spin"
+                            : "bi bi-arrow-counterclockwise"
+                        }
+                        aria-hidden="true"
+                      />
+                      {reenfileirando ? "Reenfileirando…" : "Reenfileirar"}
+                    </Button>
+
+                    <span className="text-xs opacity-80">
+                      Devolve o evento à fila. O processamento acontece em segundo plano.
+                    </span>
+                  </div>
+                ) : null}
+              </Alert>
+            ) : null}
+
+            {avisoRequeue ? (
+              <Alert
+                tone={avisoRequeue.tom}
+                icon={
+                  avisoRequeue.tom === "success"
+                    ? "bi-check-circle-fill"
+                    : "bi-exclamation-octagon-fill"
+                }
+              >
+                {avisoRequeue.texto}
               </Alert>
             ) : null}
 

@@ -18,6 +18,10 @@ builder.Services.AddSabemiInfrastructure(builder.Configuration);
 builder.Services.Configure<AuthOptions>(o =>
     o.IsProduction = builder.Environment.IsProduction());
 
+// Metricas em :9464/metrics e tracing por OTLP. Ver ObservabilidadeDoWorker.cs -
+// e nele que a regra pesada roda, e uma fila que para de drenar so aparece aqui.
+builder.Services.AddObservabilidadeDoWorker(builder.Configuration);
+
 builder.Services.AddHostedService<PaymentProcessingWorker>();
 builder.Services.AddHostedService<LoginRequestCleanupWorker>();
 

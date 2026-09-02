@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Sabemi.Domain.Processing;
 using Sabemi.Application.Abstractions;
 using Sabemi.Application.Contracts;
 using Sabemi.Domain.Entities;
@@ -79,6 +80,7 @@ public sealed class PaymentQueryService(IAppDbContext db)
             StatusOrigem = e.StatusOrigem,
             StatusProcessamento = e.StatusProcessamento.ToString().ToUpperInvariant(),
             Erro = e.Erro,
+            Diagnostico = Diagnosticar(e),
             RecebidoEm = e.RecebidoEm,
             ProcessadoEm = e.ProcessadoEm,
             Tentativas = e.Tentativas,
@@ -142,8 +144,18 @@ public sealed class PaymentQueryService(IAppDbContext db)
         StatusOrigem = e.StatusOrigem,
         StatusProcessamento = e.StatusProcessamento.ToString().ToUpperInvariant(),
         Erro = e.Erro,
+        Diagnostico = Diagnosticar(e),
         RecebidoEm = e.RecebidoEm,
         ProcessadoEm = e.ProcessadoEm,
         Tentativas = e.Tentativas
     };
+
+    /// <summary>
+    /// Reconstroi o diagnostico a partir do codigo gravado. Nulo quando o evento
+    /// nunca falhou - a UI usa a ausencia para decidir se mostra o tooltip.
+    /// </summary>
+    private static FailureDiagnosisDto? Diagnosticar(PaymentEvent e)
+        => e.ErroCodigo is null && e.Erro is null
+            ? null
+            : FailureDiagnosisDto.From(FailureCatalog.Describe(e.ErroCodigo));
 }

@@ -75,14 +75,19 @@ public sealed class PostgresFixture : IAsyncLifetime
     /// </remarks>
     public async Task ResetAsync()
     {
+        // O schema vem de `SabemiDbContext.Schema` em vez de literal: quando ele
+        // mudou de `dotnet` para `sabemi`, este SQL foi um dos poucos pontos que
+        // o compilador nao pegou - e a suite inteira quebrou de uma vez.
+        var schema = SabemiDbContext.Schema;
+
         await using var db = CreateDbContext();
         await db.Database.ExecuteSqlRawAsync(
-            """
-            TRUNCATE TABLE dotnet.processing_jobs,
-                           dotnet.payment_events,
-                           dotnet.contract_statuses,
-                           dotnet.login_requests,
-                           dotnet.users
+            $"""
+            TRUNCATE TABLE {schema}.processing_jobs,
+                           {schema}.payment_events,
+                           {schema}.contract_statuses,
+                           {schema}.login_requests,
+                           {schema}.users
             RESTART IDENTITY CASCADE
             """);
     }

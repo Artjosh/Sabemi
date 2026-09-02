@@ -2,7 +2,22 @@ import { Prisma } from "@/generated/prisma/client";
 
 import { bffConfig } from "./config";
 import { prisma } from "./db";
+import { classificar } from "./failure-catalog";
 import { parsePartnerStatus } from "./validation";
+import type { Span } from "@opentelemetry/api";
+
+import { registrarFalha, registrarProcessamento, tracer } from "./telemetry";
+
+/**
+ * Schema compartilhado pelos dois backends.
+ *
+ * A reivindicacao usa SQL bruto (`FOR UPDATE SKIP LOCKED` nao tem equivalente
+ * na API do Prisma), e SQL bruto nao respeita o `?schema=` da URL de conexao -
+ * a tabela precisa ser qualificada. A constante existe para que uma mudanca de
+ * schema seja feita num lugar so: quando ele passou de `vinext` para `sabemi`,
+ * estas duas linhas de SQL foram o unico ponto que o compilador nao pegou.
+ */
+const SCHEMA = "sabemi";
 
 /**
  * Processamento em background do backend VINEXT.
@@ -51,7 +66,7 @@ const WORKER_ID = `vinext:${process.pid}`;
  */
 async function claimJobs(batchSize: number, agora: Date): Promise<string[]> {
   const rows = await prisma.$queryRaw<Array<{ id: string }>>`
-    UPDATE vinext.processing_jobs AS j
+    UPDATE ${Prisma.raw(SCHEMA)}.processing_jobs AS j
        SET estado           = 'PROCESSANDO',
            tentativas       = j.tentativas + 1,
            reivindicado_em  = ${agora},
@@ -59,7 +74,7 @@ async function claimJobs(batchSize: number, agora: Date): Promise<string[]> {
            atualizado_em    = ${agora}
       FROM (
             SELECT id
-              FROM vinext.processing_jobs
+              FROM ${Prisma.raw(SCHEMA)}.processing_jobs
              WHERE estado = 'PENDENTE'
                AND disponivel_em <= ${agora}
              ORDER BY disponivel_em, criado_em
@@ -134,6 +149,33 @@ export async function runProcessingCycle(): Promise<CycleResult> {
 type Outcome = "succeeded" | "retried" | "failed";
 
 async function processOne(jobId: string): Promise<Outcome> {
+  // Um span por ITEM, e nao por ciclo: e assim que se ve quanto tempo um
+  // pagamento especifico levou, e nao so a media do lote. A regra pesada (~2s)
+  // domina esta duracao por desenho - e util ver isso no trace.
+  return tracer.startActiveSpan("fila.processamento", async (span) => {
+    const inicio = performance.now();
+    let desfecho = "erro";
+
+    try {
+      const resultado = await processOneCore(jobId, span);
+
+      desfecho =
+        resultado === "succeeded"
+          ? "sucesso"
+          : resultado === "retried"
+            ? "retentativa"
+            : "falha";
+
+      span.setAttribute("sabemi.desfecho", desfecho);
+      return resultado;
+    } finally {
+      registrarProcessamento(desfecho, (performance.now() - inicio) / 1000);
+      span.end();
+    }
+  });
+}
+
+async function processOneCore(jobId: string, span: Span): Promise<Outcome> {
   const job = await prisma.processingJob.findUnique({
     where: { id: jobId },
     include: { paymentEvent: true },
@@ -174,7 +216,13 @@ async function processOne(jobId: string): Promise<Outcome> {
 
       await tx.paymentEvent.update({
         where: { id: evento.id },
-        data: { statusProcessamento: "SUCESSO", processadoEm: agora, erro: null },
+        data: {
+          statusProcessamento: "SUCESSO",
+          processadoEm: agora,
+          erro: null,
+          erroCategoria: null,
+          erroCodigo: null,
+        },
       });
 
       await tx.processingJob.update({
@@ -187,7 +235,26 @@ async function processOne(jobId: string): Promise<Outcome> {
   } catch (error) {
     const agora = new Date();
     const mensagem = error instanceof Error ? error.message : String(error);
-    const podeRetentar = job.tentativas < job.maxTentativas;
+
+    // A natureza da falha decide o retry, nao so a contagem de tentativas. Um
+    // contrato inexistente nao passa a existir na segunda tentativa: insistir
+    // tres vezes so atrasa em minutos a unica coisa util, que e o evento
+    // aparecer como ERRO no painel, com a causa dita em portugues e o botao de
+    // reenfileirar disponivel para depois que a pessoa corrigir o que faltava.
+    //
+    // Mesma regra do backend .NET (PaymentProcessingService.ProcessOneAsync).
+    const diagnostico = classificar(error);
+    const podeRetentar = job.tentativas < job.maxTentativas && diagnostico.retentavel;
+
+    // A metrica separada por codigo e categoria responde, em plantao, a unica
+    // pergunta que importa nos primeiros segundos: "isso vai se resolver
+    // sozinho?".
+    registrarFalha(diagnostico.codigo, diagnostico.categoria);
+
+    span.recordException(error as Error);
+    span.setStatus({ code: 2 /* ERROR */ });
+    span.setAttribute("sabemi.erro.codigo", diagnostico.codigo);
+    span.setAttribute("sabemi.erro.categoria", diagnostico.categoria);
 
     if (podeRetentar) {
       // Backoff exponencial (base 2, teto de 5 min) para nao martelar uma
@@ -211,7 +278,12 @@ async function processOne(jobId: string): Promise<Outcome> {
         }),
         prisma.paymentEvent.update({
           where: { id: evento.id },
-          data: { statusProcessamento: "PENDENTE", erro: mensagem.slice(0, 2000) },
+          data: {
+            statusProcessamento: "PENDENTE",
+            erro: mensagem.slice(0, 2000),
+            erroCategoria: diagnostico.categoria,
+            erroCodigo: diagnostico.codigo,
+          },
         }),
       ]);
 
@@ -228,6 +300,8 @@ async function processOne(jobId: string): Promise<Outcome> {
         data: {
           statusProcessamento: "ERRO",
           erro: mensagem.slice(0, 2000),
+          erroCategoria: diagnostico.categoria,
+          erroCodigo: diagnostico.codigo,
           processadoEm: agora,
         },
       }),

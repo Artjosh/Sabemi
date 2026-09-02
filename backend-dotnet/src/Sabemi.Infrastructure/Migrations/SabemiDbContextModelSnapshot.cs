@@ -17,7 +17,7 @@ namespace Sabemi.Infrastructure.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasDefaultSchema("dotnet")
+                .HasDefaultSchema("sabemi")
                 .HasAnnotation("ProductVersion", "10.0.11")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
@@ -46,7 +46,7 @@ namespace Sabemi.Infrastructure.Migrations
                         .IsUnique()
                         .HasDatabaseName("ux_users_email");
 
-                    b.ToTable("users", "dotnet");
+                    b.ToTable("users", "sabemi");
                 });
 
             modelBuilder.Entity("Sabemi.Domain.Entities.ContractStatus", b =>
@@ -92,7 +92,7 @@ namespace Sabemi.Infrastructure.Migrations
 
                     b.HasKey("IdContrato");
 
-                    b.ToTable("contract_statuses", "dotnet");
+                    b.ToTable("contract_statuses", "sabemi");
                 });
 
             modelBuilder.Entity("Sabemi.Domain.Entities.LoginRequest", b =>
@@ -158,7 +158,7 @@ namespace Sabemi.Infrastructure.Migrations
                         .IsUnique()
                         .HasDatabaseName("ux_login_requests_selector");
 
-                    b.ToTable("login_requests", "dotnet");
+                    b.ToTable("login_requests", "sabemi");
                 });
 
             modelBuilder.Entity("Sabemi.Domain.Entities.PaymentEvent", b =>
@@ -179,6 +179,16 @@ namespace Sabemi.Infrastructure.Migrations
                     b.Property<string>("Erro")
                         .HasColumnType("text")
                         .HasColumnName("erro");
+
+                    b.Property<string>("ErroCategoria")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("erro_categoria");
+
+                    b.Property<string>("ErroCodigo")
+                        .HasMaxLength(48)
+                        .HasColumnType("character varying(48)")
+                        .HasColumnName("erro_codigo");
 
                     b.Property<string>("IdContrato")
                         .HasMaxLength(128)
@@ -226,6 +236,10 @@ namespace Sabemi.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ErroCategoria")
+                        .HasDatabaseName("ix_payment_events_erro_categoria")
+                        .HasFilter("erro_categoria IS NOT NULL");
+
                     b.HasIndex("IdContrato")
                         .HasDatabaseName("ix_payment_events_id_contrato");
 
@@ -236,7 +250,7 @@ namespace Sabemi.Infrastructure.Migrations
                     b.HasIndex("StatusProcessamento", "RecebidoEm")
                         .HasDatabaseName("ix_payment_events_status_recebido");
 
-                    b.ToTable("payment_events", "dotnet");
+                    b.ToTable("payment_events", "sabemi");
                 });
 
             modelBuilder.Entity("Sabemi.Domain.Entities.ProcessingJob", b =>
@@ -298,7 +312,7 @@ namespace Sabemi.Infrastructure.Migrations
                     b.HasIndex("Estado", "DisponivelEm")
                         .HasDatabaseName("ix_processing_jobs_estado_disponivel");
 
-                    b.ToTable("processing_jobs", "dotnet");
+                    b.ToTable("processing_jobs", "sabemi");
                 });
 
             modelBuilder.Entity("Sabemi.Domain.Entities.ProcessingJob", b =>

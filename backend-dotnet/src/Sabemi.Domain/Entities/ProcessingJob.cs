@@ -114,6 +114,38 @@ public class ProcessingJob
     }
 
     /// <summary>
+    /// Devolve o item a fila por decisao de uma pessoa, depois de uma falha
+    /// definitiva.
+    /// </summary>
+    /// <remarks>
+    /// <b>Por que zerar as tentativas.</b> Um item que falhou esgotou o
+    /// orcamento de tentativas. Reenfileirar sem zerar devolveria um item que
+    /// falha na primeira tentativa e volta a morrer - o botao pareceria nao
+    /// funcionar. Quem clica esta afirmando que a causa foi tratada (o contrato
+    /// que faltava foi cadastrado, a dependencia voltou), e isso e um novo
+    /// orcamento.
+    ///
+    /// <b>Por que <c>DisponivelEm</c> agora, sem backoff.</b> O backoff protege
+    /// uma dependencia instavel de ser martelada por um laco automatico. Aqui
+    /// nao ha laco: houve um clique, e a pessoa esta esperando o resultado.
+    ///
+    /// <b>O que NAO e limpo.</b> <see cref="UltimoErro"/> permanece ate o proximo
+    /// desfecho. Se a nova tentativa falhar de outra forma, o campo e
+    /// sobrescrito; se passar, o <see cref="Complete"/> o limpa. Apaga-lo aqui
+    /// destruiria o unico registro do que havia acontecido, justo enquanto
+    /// alguem investiga.
+    /// </remarks>
+    public void Requeue(DateTimeOffset agora)
+    {
+        Estado = JobState.Pendente;
+        Tentativas = 0;
+        DisponivelEm = agora;
+        ReivindicadoEm = null;
+        ReivindicadoPor = null;
+        AtualizadoEm = agora;
+    }
+
+    /// <summary>
     /// Devolve a fila um item cujo worker morreu sem concluir (o
     /// <c>VisibilityTimeout</c> expirou). Nao consome uma nova tentativa aqui:
     /// a tentativa ja foi contada no <see cref="Claim"/>.

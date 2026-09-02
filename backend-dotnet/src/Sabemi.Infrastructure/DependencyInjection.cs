@@ -77,6 +77,7 @@ public static class DependencyInjection
         services.AddScoped<PaymentIngestionService>();
         services.AddScoped<PaymentQueryService>();
         services.AddScoped<PaymentProcessingService>();
+        services.AddScoped<PaymentRequeueService>();
         services.AddScoped<AuthService>();
         services.AddSingleton<WebhookAuthenticator>();
 

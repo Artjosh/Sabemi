@@ -1,0 +1,51 @@
+# =============================================================================
+# Normalizacao de fim de linha.
+#
+# POR QUE ESTE ARQUIVO EXISTE
+# ---------------------------
+# No Windows, o git converte os arquivos para CRLF no checkout. Para um script
+# de shell que roda dentro de um container Linux, isso e fatal: o shebang vira
+# `#!/bin/sh\r`, o kernel procura um interpretador chamado `sh\r`, nao encontra,
+# e o container morre com "no such file or directory" - uma mensagem que aponta
+# para o proprio script, e nao para o motivo real.
+#
+# Aconteceu aqui: o `docker-entrypoint.sh` do frontend entrou em laco de
+# reinicio depois de um commit feito no Windows.
+# =============================================================================
+
+# Deteccao automatica para texto em geral.
+* text=auto
+
+# Sempre LF - sao executados por Linux, dentro dos containers.
+*.sh            text eol=lf
+*.bash          text eol=lf
+Dockerfile      text eol=lf
+*.Dockerfile    text eol=lf
+docker-entrypoint.sh text eol=lf
+
+# Configuracao consumida por ferramentas que esperam LF.
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.json          text eol=lf
+*.sql           text eol=lf
+*.prisma        text eol=lf
+
+# Codigo - LF em todo lugar mantem os diffs limpos entre sistemas.
+*.cs            text eol=lf
+*.csproj        text eol=lf
+*.slnx          text eol=lf
+*.ts            text eol=lf
+*.tsx           text eol=lf
+*.mjs           text eol=lf
+*.css           text eol=lf
+*.md            text eol=lf
+
+# Binarios - nunca converter.
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.gif           binary
+*.ico           binary
+*.pdf           binary
+*.woff          binary
+*.woff2         binary

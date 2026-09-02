@@ -57,6 +57,7 @@ function evento(over: Partial<PaymentEventDto> = {}): PaymentEventDto {
     status_origem: "PAGO",
     status_processamento: "SUCESSO",
     erro: null,
+    diagnostico: null,
     recebido_em: "2026-09-01T12:00:00Z",
     processado_em: "2026-09-01T12:00:02Z",
     tentativas: 1,
@@ -74,12 +75,26 @@ const EVENTOS = [
     id_transacao: "E-1",
     status_processamento: "ERRO",
     erro: "gateway indisponivel",
+    diagnostico: {
+      categoria: "TRANSITORIA",
+      codigo: "REDE_INDISPONIVEL",
+      explicacao: "Nao foi possivel alcancar um servico externo pela rede.",
+      acao_sugerida: "Nenhuma acao necessaria: sera retentado.",
+      retentavel: true,
+    },
     id_contrato: "CTR-A",
   }),
   evento({
     id_transacao: "I-1",
     status_processamento: "INVALIDO",
     erro: "O campo 'valor' deve ser maior que zero.",
+    diagnostico: {
+      categoria: "PERMANENTE",
+      codigo: "PAYLOAD_INVALIDO",
+      explicacao: "O corpo do webhook nao passou na validacao de contrato.",
+      acao_sugerida: "Corrija na origem e reenvie com um novo id_transacao.",
+      retentavel: false,
+    },
     id_contrato: "CTR-B",
     valor: null,
   }),
@@ -181,14 +196,29 @@ describe("visualização de erros", () => {
     expect(linhaSucesso.className).not.toContain("bg-state-error-soft");
   });
 
-  it("mostra o motivo do erro sem precisar abrir o detalhe", async () => {
-    // E a informacao que o operador procura ao ver uma linha vermelha.
+  it("mostra a causa da falha sem precisar abrir o detalhe", async () => {
+    // A celula mostrava a mensagem crua da excecao, truncada em 16rem - algo
+    // como "23503: insert or update on table..." cortado no meio, que nao diz
+    // nem o que aconteceu nem o que fazer. Agora mostra a LEITURA da falha, e a
+    // distincao entre temporaria e definitiva e o que decide se o operador
+    // precisa agir ou apenas esperar.
     renderizarDashboard();
 
-    expect(await screen.findByText("gateway indisponivel")).toBeInTheDocument();
-    expect(
-      screen.getByText("O campo 'valor' deve ser maior que zero."),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Falha temporária")).toBeInTheDocument();
+    expect(screen.getByText("Falha definitiva")).toBeInTheDocument();
+  });
+
+  it("o rótulo da falha é acessível e carrega a explicação", async () => {
+    // O gatilho e um <button> justamente para ser alcancavel por teclado e por
+    // toque - um <span> com `title` nao seria. E o nome acessivel precisa dizer
+    // do que se trata: um leitor de tela anunciando so "botao" seria inutil.
+    renderizarDashboard();
+
+    const gatilho = await screen.findByRole("button", {
+      name: /Falha temporária.*rede/i,
+    });
+
+    expect(gatilho).toBeInTheDocument();
   });
 
   it("os cartões separam erro de processamento de payload inválido", async () => {
@@ -367,14 +397,14 @@ describe("detalhe do evento", () => {
 
 describe("seletor de backend", () => {
   it("mostra os dois backends com indicador de disponibilidade", async () => {
-    render(<BackendSwitcher hasSession={false} />);
+    render(<BackendSwitcher />);
 
     expect(await screen.findByRole("radio", { name: /\.NET/i })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /VINEXT/i })).toBeInTheDocument();
   });
 
   it("marca o backend ativo", async () => {
-    render(<BackendSwitcher hasSession={false} />);
+    render(<BackendSwitcher />);
 
     const dotnet = await screen.findByRole("radio", { name: /\.NET/i });
     const vinext = screen.getByRole("radio", { name: /VINEXT/i });
@@ -383,73 +413,58 @@ describe("seletor de backend", () => {
     expect(vinext).toHaveAttribute("aria-checked", "false");
   });
 
-  it("troca direto quando não há sessão aberta", async () => {
+  it("troca de backend e recarrega, mantendo a sessão", async () => {
     const user = userEvent.setup();
     mocks.switchBackend.mockResolvedValue({
       active: "vinext",
       previous: "dotnet",
-      session_cleared: false,
+      session_preserved: true,
     });
 
-    // `window.location.assign` nao existe em jsdom; substituido para observar a
-    // recarga que a troca provoca.
-    const assign = vi.fn();
+    // `window.location.reload` não existe em jsdom; substituído para observar
+    // a recarga que a troca provoca.
+    const reload = vi.fn();
     Object.defineProperty(window, "location", {
-      value: { ...window.location, assign },
+      value: { ...window.location, reload },
       writable: true,
     });
 
-    render(<BackendSwitcher hasSession={false} />);
+    render(<BackendSwitcher />);
     await user.click(await screen.findByRole("radio", { name: /VINEXT/i }));
 
     await waitFor(() => expect(mocks.switchBackend).toHaveBeenCalledWith("vinext"));
-    await waitFor(() => expect(assign).toHaveBeenCalledWith("/"));
+
+    // Recarrega no MESMO lugar: não há login a refazer.
+    await waitFor(() => expect(reload).toHaveBeenCalled());
   });
 
-  it("avisa antes de trocar com sessão aberta - a troca encerra a sessão", async () => {
-    // Cada backend tem o proprio banco e os proprios usuarios; a sessao atual nao
-    // vale no outro. Descobrir isso com um 401 sem explicacao seria pior.
-    const user = userEvent.setup();
-    render(<BackendSwitcher hasSession={true} />);
-
-    await user.click(await screen.findByRole("radio", { name: /VINEXT/i }));
-
-    expect(await screen.findByText(/encerra sua sessão atual/i)).toBeInTheDocument();
-    // Ainda nao trocou: espera a confirmacao.
-    expect(mocks.switchBackend).not.toHaveBeenCalled();
-  });
-
-  it("confirmar prossegue com a troca", async () => {
+  it("a troca não pede confirmação — não há sessão a perder", async () => {
+    // Quando os backends tinham bancos separados, trocar deslogava e a
+    // interface avisava antes. Com o schema compartilhado esse aviso deixou de
+    // existir: a troca é imediata.
     const user = userEvent.setup();
     mocks.switchBackend.mockResolvedValue({
       active: "vinext",
       previous: "dotnet",
-      session_cleared: true,
+      session_preserved: true,
     });
 
-    render(<BackendSwitcher hasSession={true} />);
+    Object.defineProperty(window, "location", {
+      value: { ...window.location, reload: vi.fn() },
+      writable: true,
+    });
+
+    render(<BackendSwitcher />);
     await user.click(await screen.findByRole("radio", { name: /VINEXT/i }));
-    await user.click(await screen.findByRole("button", { name: /trocar mesmo assim/i }));
 
-    await waitFor(() => expect(mocks.switchBackend).toHaveBeenCalledWith("vinext"));
-  });
-
-  it("cancelar desiste da troca", async () => {
-    const user = userEvent.setup();
-    render(<BackendSwitcher hasSession={true} />);
-
-    await user.click(await screen.findByRole("radio", { name: /VINEXT/i }));
-    await user.click(await screen.findByRole("button", { name: /cancelar/i }));
-
-    await waitFor(() =>
-      expect(screen.queryByText(/encerra sua sessão atual/i)).not.toBeInTheDocument(),
-    );
-    expect(mocks.switchBackend).not.toHaveBeenCalled();
+    expect(screen.queryByText(/encerra sua sessão/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /trocar mesmo assim/i })).not.toBeInTheDocument();
+    await waitFor(() => expect(mocks.switchBackend).toHaveBeenCalled());
   });
 
   it("clicar no backend já ativo não faz nada", async () => {
     const user = userEvent.setup();
-    render(<BackendSwitcher hasSession={false} />);
+    render(<BackendSwitcher />);
 
     await user.click(await screen.findByRole("radio", { name: /\.NET/i }));
 

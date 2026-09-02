@@ -22,9 +22,24 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: "standalone",
 
-  // O cliente do Prisma e nativo do servidor: nao pode ser empacotado para o
-  // browser nem pre-agrupado pelo bundler.
-  serverExternalPackages: ["@prisma/client", "@prisma/adapter-pg", "pg"],
+  /**
+   * NADA fica fora do bundle.
+   *
+   * A lista de `serverExternalPackages` esta vazia de proposito, e a razao veio
+   * de um defeito real: com `pg` marcado como externo, a imagem precisava
+   * instala-lo a parte, e a versao instalada no runtime divergia da usada no
+   * build. O `@prisma/adapter-pg` (empacotado) e o `pg` (do runtime) deixavam
+   * de se entender, e o Prisma caia no driver interno - que falhava com um erro
+   * de credencial enganoso, apontando para um usuario que a aplicacao nem usa.
+   *
+   * Empacotando tudo, o container nao carrega `node_modules` de aplicacao
+   * alguma: a imagem fica menor E o que roda em producao e exatamente o que foi
+   * testado no build.
+   *
+   * O Prisma 7 com driver adapter e JavaScript puro - sem engine binaria - e
+   * empacota sem problema.
+   */
+  serverExternalPackages: [],
 };
 
 export default nextConfig;

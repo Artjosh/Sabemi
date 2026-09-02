@@ -1,4 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Sabemi.Application.Observability;
+using System.Diagnostics;
+using Sabemi.Domain.Processing;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Sabemi.Application.Abstractions;
@@ -99,6 +102,37 @@ public sealed class PaymentProcessingService(
 
     private async Task<Outcome> ProcessOneAsync(Guid jobId, CancellationToken ct)
     {
+        // Um span por ITEM, e nao por ciclo: e assim que se ve quanto tempo um
+        // pagamento especifico levou, e nao so a media do lote. A regra pesada
+        // (~2s) domina esta duracao por desenho - e util ver isso no trace.
+        using var span = SabemiTelemetry.Activity.StartActivity(
+            "fila.processamento", ActivityKind.Consumer);
+
+        var cronometro = Stopwatch.StartNew();
+        var desfechoMedido = "erro";
+
+        try
+        {
+            var resultado = await ProcessOneCoreAsync(jobId, span, ct);
+
+            desfechoMedido = resultado switch
+            {
+                Outcome.Succeeded => "sucesso",
+                Outcome.Retried => "retentativa",
+                _ => "falha",
+            };
+
+            span?.SetTag("sabemi.desfecho", desfechoMedido);
+            return resultado;
+        }
+        finally
+        {
+            SabemiTelemetry.RegistrarProcessamento(desfechoMedido, cronometro.Elapsed.TotalSeconds);
+        }
+    }
+
+    private async Task<Outcome> ProcessOneCoreAsync(Guid jobId, Activity? span, CancellationToken ct)
+    {
         // Comeca de um estado limpo e releia: o item anterior do lote pode ter
         // limpado o rastreamento.
         db.ResetTrackedState();
@@ -114,6 +148,11 @@ public sealed class PaymentProcessingService(
         var eventoId = evento.Id;
         var idTransacao = evento.IdTransacao;
         var tentativaAtual = job.Tentativas;
+
+        // Atributos do span, nao rotulos de metrica: no trace o id custa nada e
+        // e o que permite achar um pagamento especifico.
+        span?.SetTag("sabemi.id_transacao", idTransacao);
+        span?.SetTag("sabemi.tentativa", job.Tentativas + 1);
         var maxTentativas = job.MaxTentativas;
         var podeRetentar = job.CanRetry;
 
@@ -176,26 +215,57 @@ public sealed class PaymentProcessingService(
             var ev = await db.PaymentEvents.FirstAsync(e => e.Id == eventoId, ct);
             var jb = await db.ProcessingJobs.FirstAsync(j => j.Id == jobId, ct);
 
-            if (podeRetentar)
+            // A natureza da falha decide o retry, nao so a contagem de
+            // tentativas. Um contrato inexistente nao passa a existir na segunda
+            // tentativa: insistir tres vezes so atrasa em minutos a unica coisa
+            // util, que e o evento aparecer como ERRO no painel, com a causa
+            // dita em portugues e o botao de reenfileirar disponivel para depois
+            // que a pessoa corrigir o que faltava.
+            var diagnostico = FailureClassifier.Classify(ex);
+
+            // A metrica separada por codigo e categoria responde, em plantao, a
+            // unica pergunta que importa nos primeiros segundos: "isso vai se
+            // resolver sozinho?".
+            SabemiTelemetry.RegistrarFalha(
+                diagnostico.Code,
+                diagnostico.Category.ToString().ToUpperInvariant());
+
+            span?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            span?.SetTag("sabemi.erro.codigo", diagnostico.Code);
+            span?.SetTag("sabemi.erro.categoria", diagnostico.Category.ToString().ToUpperInvariant());
+
+            if (podeRetentar && diagnostico.IsRetryable)
             {
                 jb.Reschedule(ex.Message, agora, _options.BaseRetryDelay);
-                ev.MarkRetrying(ex.Message, tentativaAtual);
+                ev.MarkRetrying(ex.Message, tentativaAtual, diagnostico);
                 await db.SaveChangesAsync(ct);
 
                 logger.LogWarning(ex,
-                    "Evento {IdTransacao} falhou na tentativa {Tentativa}/{Max}; reagendado para {Quando}.",
-                    idTransacao, tentativaAtual, maxTentativas, jb.DisponivelEm);
+                    "Evento {IdTransacao} falhou na tentativa {Tentativa}/{Max} ({Codigo}, {Categoria}); reagendado para {Quando}.",
+                    idTransacao, tentativaAtual, maxTentativas,
+                    diagnostico.Code, diagnostico.Category, jb.DisponivelEm);
 
                 return Outcome.Retried;
             }
 
             jb.Fail(ex.Message, agora);
-            ev.MarkFailed(ex.Message, agora);
+            ev.MarkFailed(ex.Message, agora, diagnostico);
             await db.SaveChangesAsync(ct);
 
-            logger.LogError(ex,
-                "Evento {IdTransacao} falhou definitivamente apos {Max} tentativas.",
-                idTransacao, maxTentativas);
+            if (diagnostico.IsRetryable)
+            {
+                logger.LogError(ex,
+                    "Evento {IdTransacao} falhou definitivamente apos {Max} tentativas ({Codigo}).",
+                    idTransacao, maxTentativas, diagnostico.Code);
+            }
+            else
+            {
+                // Sem retry: dizer no log que a causa e permanente evita que
+                // quem investiga procure por tentativas que nunca aconteceram.
+                logger.LogError(ex,
+                    "Evento {IdTransacao} falhou por causa PERMANENTE ({Codigo}) na tentativa {Tentativa}; nao sera retentado.",
+                    idTransacao, diagnostico.Code, tentativaAtual);
+            }
 
             return Outcome.Failed;
         }

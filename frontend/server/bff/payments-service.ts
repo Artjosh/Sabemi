@@ -14,17 +14,24 @@ import { PROCESSING_STATUSES } from "@/lib/contracts";
 
 import { bffConfig } from "./config";
 import { prisma } from "./db";
+import { CODIGO_PAYLOAD_INVALIDO, descrever } from "./failure-catalog";
+import { uuidV7 } from "./ids";
 import { computeSignature, fixedTimeEquals } from "./crypto";
 import { paymentWebhookSchema, salvageFields, toFieldErrors } from "./validation";
+import { registrarIngestao, tracer } from "./telemetry";
 
 /**
  * Ingestao e consulta de pagamentos no backend VINEXT.
  *
  * Esta e a segunda implementacao COMPLETA do contrato - nao um proxy para o
- * .NET. Ela tem o proprio banco (schema `vinext`), a propria validacao, a
- * propria fila e o proprio processamento em background. E isso que torna a
- * troca de backend uma troca de verdade: os dois lados resolvem o mesmo
- * problema de forma independente, e a UI nao distingue qual respondeu.
+ * .NET. Ela tem o proprio ORM, a propria validacao, a propria fila e o proprio
+ * processamento em background - resolvendo o mesmo problema de forma
+ * independente, sem que a UI distinga qual dos dois respondeu.
+ *
+ * O que os dois COMPARTILHAM e o schema `sabemi`: mesmas tabelas, mesmo indice
+ * unico de idempotencia. E por isso que um evento entregue aqui aparece no
+ * dashboard do outro backend, e que uma reentrega no .NET reconhece como
+ * duplicata um evento que entrou por esta rota.
  */
 
 /** Codigo do PostgreSQL para violacao de indice unico, exposto pelo Prisma. */
@@ -98,6 +105,52 @@ export async function ingestPayment(
   rawBody: string,
   signatureVerified: boolean,
 ): Promise<IngestionResult> {
+  // A telemetria fica num invólucro, e nao espalhada pelo corpo do servico: o
+  // caminho de ingestao tem tres desfechos e varios pontos de saida, e um
+  // `add(1, ...)` antes de cada `return` seria facil de esquecer justamente no
+  // caminho novo. Aqui e impossivel sair sem ser medido.
+  //
+  // `sabemi_webhook_duration_seconds` e a metrica que prova o requisito central
+  // da task: se ela passar de alguns milissegundos, a regra pesada voltou para
+  // dentro do request.
+  return tracer.startActiveSpan("webhook.ingestao", async (span) => {
+    const inicio = performance.now();
+    let desfecho = "erro";
+
+    try {
+      const resultado = await ingestPaymentCore(rawBody, signatureVerified);
+
+      desfecho =
+        resultado.kind === "accepted"
+          ? "aceito"
+          : resultado.kind === "duplicate"
+            ? "duplicado"
+            : "invalido";
+
+      // `id_transacao` como ATRIBUTO do span, e nao rotulo de metrica: no trace
+      // ele custa nada e e o que permite achar uma entrega especifica; como
+      // rotulo, criaria uma serie temporal por transacao.
+      span.setAttribute("sabemi.id_transacao", resultado.ack.id_transacao);
+      span.setAttribute("sabemi.desfecho", desfecho);
+
+      return resultado;
+    } catch (erro) {
+      // Uma falha inesperada e diferente de um payload invalido: a primeira e
+      // nossa, a segunda e do parceiro. Marcar o span separa as duas no trace.
+      span.recordException(erro as Error);
+      span.setStatus({ code: 2 /* ERROR */ });
+      throw erro;
+    } finally {
+      registrarIngestao(desfecho, (performance.now() - inicio) / 1000);
+      span.end();
+    }
+  });
+}
+
+async function ingestPaymentCore(
+  rawBody: string,
+  signatureVerified: boolean,
+): Promise<IngestionResult> {
   const agora = new Date();
 
   let parsedJson: unknown;
@@ -142,7 +195,13 @@ export async function ingestPayment(
 
   // Atalho para o caso frequente de reentrega. Nao e a garantia.
   const existente = await prisma.paymentEvent.findUnique({ where: { idTransacao } });
-  if (existente) return duplicateResult(existente.idTransacao, existente.statusProcessamento, existente.recebidoEm);
+  if (existente) {
+    return duplicateResult(
+      existente.idTransacao,
+      comoStatus(existente.statusProcessamento),
+      existente.recebidoEm,
+    );
+  }
 
   if (!validation.success) {
     const fieldErrors = toFieldErrors(validation.error);
@@ -153,6 +212,7 @@ export async function ingestPayment(
       // invisivel justamente quando ela mais precisa aparecer no dashboard.
       await prisma.paymentEvent.create({
         data: {
+          id: uuidV7(),
           idTransacao,
           idContrato: salvaged.idContrato,
           valor: salvaged.valor === null ? null : new Prisma.Decimal(salvaged.valor),
@@ -160,16 +220,27 @@ export async function ingestPayment(
           statusOrigem: salvaged.statusOrigem,
           statusProcessamento: "INVALIDO",
           erro: motivos.slice(0, 2000),
+
+          // Um evento invalido tambem tem uma causa a explicar no painel. Sem
+          // isto ele seria o unico estado de erro sem tooltip - e e justamente
+          // o mais frequente.
+          erroCategoria: "PERMANENTE",
+          erroCodigo: CODIGO_PAYLOAD_INVALIDO,
           payloadBruto: parsedJson as Prisma.InputJsonValue,
           assinaturaVerificada: signatureVerified,
           recebidoEm: agora,
           processadoEm: agora,
+          tentativas: 0,
         },
       });
     } catch (error) {
       if (isUniqueViolation(error)) {
         const vencedor = await prisma.paymentEvent.findUnique({ where: { idTransacao } });
-        return duplicateResult(idTransacao, vencedor?.statusProcessamento ?? "DUPLICADO", vencedor?.recebidoEm ?? agora);
+        return duplicateResult(
+          idTransacao,
+          vencedor ? comoStatus(vencedor.statusProcessamento) : "DUPLICADO",
+          vencedor?.recebidoEm ?? agora,
+        );
       }
       throw error;
     }
@@ -193,6 +264,7 @@ export async function ingestPayment(
     await prisma.$transaction(async (tx) => {
       const evento = await tx.paymentEvent.create({
         data: {
+          id: uuidV7(),
           idTransacao,
           idContrato: dados.id_contrato,
           valor: new Prisma.Decimal(dados.valor),
@@ -202,14 +274,20 @@ export async function ingestPayment(
           payloadBruto: parsedJson as Prisma.InputJsonValue,
           assinaturaVerificada: signatureVerified,
           recebidoEm: agora,
+          tentativas: 0,
         },
       });
 
       await tx.processingJob.create({
         data: {
+          id: uuidV7(),
           paymentEventId: evento.id,
+          estado: "PENDENTE",
+          tentativas: 0,
           maxTentativas: bffConfig.processing.maxTentativas,
           disponivelEm: agora,
+          criadoEm: agora,
+          atualizadoEm: agora,
         },
       });
     });
@@ -218,7 +296,11 @@ export async function ingestPayment(
       // Corrida perdida: outra requisicao gravou este id_transacao entre a
       // nossa consulta e o nosso insert. E o desfecho correto.
       const vencedor = await prisma.paymentEvent.findUnique({ where: { idTransacao } });
-      return duplicateResult(idTransacao, vencedor?.statusProcessamento ?? "DUPLICADO", vencedor?.recebidoEm ?? agora);
+      return duplicateResult(
+        idTransacao,
+        vencedor ? comoStatus(vencedor.statusProcessamento) : "DUPLICADO",
+        vencedor?.recebidoEm ?? agora,
+      );
     }
     throw error;
   }
@@ -233,6 +315,15 @@ export async function ingestPayment(
       message: "Evento recebido e enfileirado para processamento.",
     },
   };
+}
+
+/**
+ * A situacao vem do banco como texto (a coluna e varchar - ver
+ * prisma/schema.prisma). A conversao acontece aqui, num lugar so, em vez de
+ * espalhar casts por todo o servico.
+ */
+function comoStatus(valor: string): ProcessingStatus {
+  return valor as ProcessingStatus;
 }
 
 function duplicateResult(
@@ -313,7 +404,7 @@ export async function getContract(idContrato: string): Promise<ContractStatusDto
     pagamentos_confirmados: row.pagamentosConfirmados,
     ultimo_pagamento_em: row.ultimoPagamentoEm?.toISOString() ?? null,
     ultima_transacao: row.ultimaTransacao,
-    situacao: row.situacao,
+    situacao: row.situacao as ContractStatusDto["situacao"],
     atualizado_em: row.atualizadoEm.toISOString(),
   };
 }
@@ -353,8 +444,16 @@ function toEventDto(row: PaymentEventRow): PaymentEventDto {
     valor: row.valor?.toNumber() ?? null,
     data_pagamento: row.dataPagamento?.toISOString() ?? null,
     status_origem: row.statusOrigem,
-    status_processamento: row.statusProcessamento,
+    status_processamento: comoStatus(row.statusProcessamento),
     erro: row.erro,
+
+    // Reconstruido a partir do codigo gravado: a explicacao e a acao sugerida
+    // nao vivem na tabela, entao melhorar um texto do tooltip nao exige tocar em
+    // linha nenhuma. Nulo quando o evento nunca falhou - a UI usa a ausencia
+    // para decidir se mostra o tooltip.
+    diagnostico:
+      row.erroCodigo === null && row.erro === null ? null : descrever(row.erroCodigo),
+
     recebido_em: row.recebidoEm.toISOString(),
     processado_em: row.processadoEm?.toISOString() ?? null,
     tentativas: row.tentativas,

@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Sabemi.Application.Observability;
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Sabemi.Application.Abstractions;
@@ -94,7 +96,66 @@ public sealed class PaymentIngestionService(
 {
     private readonly ProcessingOptions _options = options.Value;
 
+    /// <summary>
+    /// Recebe o webhook, medindo o tempo e o desfecho.
+    /// </summary>
+    /// <remarks>
+    /// A telemetria fica num inv&#243;lucro, e nao espalhada pelo corpo do metodo:
+    /// o caminho de ingestao ja tem tres desfechos e varios pontos de saida, e
+    /// um <c>Add(1, ...)</c> antes de cada <c>return</c> seria facil de esquecer
+    /// justamente no caminho novo. Aqui e impossivel sair sem ser medido.
+    ///
+    /// <c>sabemi_webhook_duration_seconds</c> e a metrica que prova o requisito
+    /// central da task: se ela passar de alguns milissegundos, a regra pesada
+    /// voltou para dentro do request.
+    /// </remarks>
     public async Task<IngestionResult> IngestAsync(
+        PaymentWebhookRequest request,
+        string rawBody,
+        bool signatureVerified,
+        CancellationToken cancellationToken = default)
+    {
+        // O span cobre a ingestao inteira. `id_transacao` vai como ATRIBUTO do
+        // span, e nao como rotulo de metrica: no trace ele custa nada e e o que
+        // permite achar uma entrega especifica; como rotulo, criaria uma serie
+        // temporal por transacao e derrubaria o Prometheus em poucas horas.
+        using var span = SabemiTelemetry.Activity.StartActivity(
+            "webhook.ingestao", ActivityKind.Server);
+
+        span?.SetTag("sabemi.id_transacao", request.IdTransacao);
+
+        var cronometro = Stopwatch.StartNew();
+        var desfecho = "erro";
+
+        try
+        {
+            var resultado = await IngestCoreAsync(request, rawBody, signatureVerified, cancellationToken);
+
+            desfecho = resultado.Kind switch
+            {
+                IngestionResultKind.Accepted => "aceito",
+                IngestionResultKind.Duplicate => "duplicado",
+                _ => "invalido",
+            };
+
+            span?.SetTag("sabemi.desfecho", desfecho);
+            return resultado;
+        }
+        catch (Exception ex)
+        {
+            // Uma falha inesperada aqui e diferente de um payload invalido: a
+            // primeira e nossa, a segunda e do parceiro. Marcar o span como erro
+            // e o que permite separa-las no trace.
+            span?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            throw;
+        }
+        finally
+        {
+            SabemiTelemetry.RegistrarIngestao(desfecho, cronometro.Elapsed.TotalSeconds);
+        }
+    }
+
+    private async Task<IngestionResult> IngestCoreAsync(
         PaymentWebhookRequest request,
         string rawBody,
         bool signatureVerified,

@@ -158,7 +158,7 @@ export function LoginForm() {
       {/* O seletor fica na tela de login de proposito: escolher o backend antes
           de entrar evita ter de deslogar depois so para troca-lo. */}
       <div className="flex justify-center">
-        <BackendSwitcher hasSession={false} />
+        <BackendSwitcher />
       </div>
 
       <Card>

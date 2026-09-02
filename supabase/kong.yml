@@ -1,0 +1,90 @@
+# =============================================================================
+# Kong - gateway do Supabase.
+#
+# Ele e a porta unica da plataforma: o cliente fala com `http://localhost:54321`
+# e o Kong roteia para GoTrue (auth), PostgREST (rest) e postgres-meta.
+#
+# POR QUE O GATEWAY IMPORTA AQUI
+# ------------------------------
+# O `anon key` e o `service_role key` sao JWTs assinados com o segredo do
+# projeto. O Kong os valida e injeta a identidade correspondente antes de
+# repassar - e o que faz o Supabase remoto e o local se comportarem igual.
+# Apontar a aplicacao para um ou para outro passa a ser so trocar a URL.
+# =============================================================================
+
+_format_version: "2.1"
+_transform: true
+
+consumers:
+  # O `anon` e a identidade publica: e a chave que vai para o navegador.
+  - username: anon
+    keyauth_credentials:
+      - key: ${SUPABASE_ANON_KEY}
+
+  # O `service_role` ignora Row Level Security. Nunca deve chegar ao navegador -
+  # so o servidor a usa.
+  - username: service_role
+    keyauth_credentials:
+      - key: ${SUPABASE_SERVICE_ROLE_KEY}
+
+acls:
+  - consumer: anon
+    group: anon
+  - consumer: service_role
+    group: admin
+
+services:
+  # -------------------------------------------------------------------- auth
+  # GoTrue: cadastro, magic link, OTP, sessao. E o segundo modo de
+  # autenticacao da aplicacao (o primeiro e o polling proprio).
+  - name: auth-v1-open
+    url: http://supabase-auth:9999/
+    routes:
+      - name: auth-v1-open
+        strip_path: true
+        paths:
+          - /auth/v1/
+    plugins:
+      - name: cors
+
+  # -------------------------------------------------------------------- rest
+  # PostgREST expoe as tabelas como API REST. Nao e usado pela aplicacao (os
+  # dois backends falam SQL direto), mas o Studio depende dele.
+  - name: rest-v1
+    url: http://supabase-rest:3000/
+    routes:
+      - name: rest-v1-all
+        strip_path: true
+        paths:
+          - /rest/v1/
+    plugins:
+      - name: cors
+      - name: key-auth
+        config:
+          hide_credentials: true
+      - name: acl
+        config:
+          hide_groups_header: true
+          allow:
+            - admin
+            - anon
+
+  # -------------------------------------------------------------------- meta
+  # postgres-meta alimenta o Studio com o catalogo do banco (tabelas, colunas,
+  # politicas). So o `service_role` alcanca.
+  - name: meta
+    url: http://supabase-meta:8080/
+    routes:
+      - name: meta-all
+        strip_path: true
+        paths:
+          - /pg/
+    plugins:
+      - name: key-auth
+        config:
+          hide_credentials: false
+      - name: acl
+        config:
+          hide_groups_header: true
+          allow:
+            - admin

@@ -15,6 +15,7 @@ using Sabemi.Application.Contracts;
 using Sabemi.Infrastructure;
 using Sabemi.Infrastructure.Persistence;
 using Serilog;
+using Sabemi.Api.Observability;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -32,6 +33,10 @@ builder.Services.AddSabemiInfrastructure(builder.Configuration);
 // altera.
 builder.Services.Configure<AuthOptions>(o =>
     o.IsProduction = builder.Environment.IsProduction());
+
+// Metricas em /metrics (sempre) e tracing por OTLP (so com endpoint
+// configurado). Ver Observability/ObservabilidadeSetup.cs.
+builder.Services.AddObservabilidade(builder.Configuration, "sabemi-api");
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -151,6 +156,20 @@ builder.Services.AddHealthChecks()
 
 var app = builder.Build();
 
+// Expor link e OTP na resposta e legitimo para uma stack de demonstracao sem
+// provedor de e-mail, mas nunca deve passar despercebido: se esta configuracao
+// for promovida a um ambiente real, o aviso esta no log de inicializacao. Aqui e
+// nao antes do Build(): so a partir deste ponto o logger do host esta de pe.
+if (app.Environment.IsProduction()
+    && app.Configuration.GetValue<bool?>("Auth:ExposeLoginCodesInDevelopment") == true)
+{
+    app.Logger.LogWarning(
+        "AVISO: Auth:ExposeLoginCodesInDevelopment=true em producao. O link e o "
+        + "codigo de acesso vao no CORPO da resposta de login - qualquer um que "
+        + "chame /auth/acesso com um e-mail entra como aquele e-mail. Use apenas "
+        + "em ambiente de demonstracao.");
+}
+
 // Traduz qualquer excecao nao tratada para o mesmo ProblemDetails do contrato,
 // para o frontend ter um unico caminho de erro.
 app.UseMiddleware<ExceptionHandlingMiddleware>();
@@ -182,6 +201,14 @@ app.MapGet("/health", (IHostEnvironment env) => Results.Ok(new
 })).AllowAnonymous().WithTags("health");
 
 app.MapHealthChecks("/health/ready").AllowAnonymous();
+
+// Exposicao das metricas no formato Prometheus.
+//
+// `AllowAnonymous` porque quem raspa e o Prometheus, que nao tem sessao. Em uma
+// rede publica isto ficaria atras do gateway ou numa porta interna: as metricas
+// nao trazem dado de pagamento, mas revelam volume e taxa de erro, que sao
+// informacao de negocio.
+app.MapPrometheusScrapingEndpoint("/metrics").AllowAnonymous();
 
 // Aplica as migrations na subida.
 //

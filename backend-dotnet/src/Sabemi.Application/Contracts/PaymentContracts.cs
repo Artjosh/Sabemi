@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Sabemi.Domain.Processing;
 using Sabemi.Domain.Enums;
 
 namespace Sabemi.Application.Contracts;
@@ -61,6 +62,53 @@ public sealed record WebhookAck
 /// o payload bruto - o detalhe e a linha da lista mais um campo, e herdar
 /// mantem os dois em sincronia automaticamente.
 /// </remarks>
+/// <summary>
+/// Falha traduzida para quem opera o painel: por que aconteceu, o que fazer, e
+/// se o sistema vai retentar sozinho.
+/// </summary>
+/// <remarks>
+/// Os textos vem do backend, e nao da UI, de proposito: os dois backends
+/// implementam o mesmo contrato e precisam explicar a mesma falha com as mesmas
+/// palavras. Um catalogo duplicado no cliente divergiria na primeira vez que
+/// so um dos lados fosse atualizado.
+/// </remarks>
+public sealed record FailureDiagnosisDto
+{
+    /// <summary>TRANSITORIA, PERMANENTE ou DESCONHECIDA.</summary>
+    [JsonPropertyName("categoria")]
+    public required string Categoria { get; init; }
+
+    /// <summary>Codigo estavel da causa - tambem usado como rotulo de metrica.</summary>
+    [JsonPropertyName("codigo")]
+    public required string Codigo { get; init; }
+
+    /// <summary>Uma frase dizendo o que deu errado, sem jargao de excecao.</summary>
+    [JsonPropertyName("explicacao")]
+    public required string Explicacao { get; init; }
+
+    /// <summary>O que a pessoa pode fazer a respeito.</summary>
+    [JsonPropertyName("acao_sugerida")]
+    public required string AcaoSugerida { get; init; }
+
+    /// <summary>
+    /// O sistema retenta sozinho esta causa? <c>false</c> em falha permanente -
+    /// e o que justifica o botao de reenfileirar aparecer para o operador, ja
+    /// que ninguem mais vai tentar de novo.
+    /// </summary>
+    [JsonPropertyName("retentavel")]
+    public required bool Retentavel { get; init; }
+
+    /// <summary>Converte o diagnostico do dominio para o contrato da API.</summary>
+    public static FailureDiagnosisDto From(FailureDiagnosis diagnostico) => new()
+    {
+        Categoria = diagnostico.Category.ToString().ToUpperInvariant(),
+        Codigo = diagnostico.Code,
+        Explicacao = diagnostico.Explanation,
+        AcaoSugerida = diagnostico.SuggestedAction,
+        Retentavel = diagnostico.IsRetryable,
+    };
+}
+
 public record PaymentEventDto
 {
     [JsonPropertyName("id")]
@@ -86,6 +134,20 @@ public record PaymentEventDto
 
     [JsonPropertyName("erro")]
     public string? Erro { get; init; }
+
+    /// <summary>
+    /// A leitura da falha, para o painel poder explicar a quem opera o que deu
+    /// errado sem expor stack trace. Nulo quando o evento nunca falhou.
+    /// </summary>
+    /// <remarks>
+    /// Apenas <c>categoria</c> e <c>codigo</c> vivem na tabela; a explicacao e a
+    /// acao sugerida sao derivadas do codigo no <c>FailureCatalog</c> a cada
+    /// consulta. E por isso que melhorar a redacao de um tooltip e um deploy, e
+    /// nao um UPDATE em massa - e que eventos antigos passam a mostrar o texto
+    /// novo.
+    /// </remarks>
+    [JsonPropertyName("diagnostico")]
+    public FailureDiagnosisDto? Diagnostico { get; init; }
 
     [JsonPropertyName("recebido_em")]
     public required DateTimeOffset RecebidoEm { get; init; }
@@ -194,4 +256,29 @@ public sealed record PaymentSummaryDto
     /// </summary>
     [JsonPropertyName("por_status")]
     public required IReadOnlyDictionary<string, int> PorStatus { get; init; }
+}
+
+/// <summary>
+/// Resposta do reenfileiramento manual de um evento.
+/// </summary>
+/// <remarks>
+/// Devolve o estado NOVO, e nao o resultado do processamento: quem processa e o
+/// worker, segundos depois. Confirmar aqui que "deu certo" seria mentir sobre
+/// algo que ainda nao aconteceu.
+/// </remarks>
+public sealed record RequeueResultDto
+{
+    [JsonPropertyName("id_transacao")]
+    public required string IdTransacao { get; init; }
+
+    /// <summary>PENDENTE - o evento voltou para a fila.</summary>
+    [JsonPropertyName("status_processamento")]
+    public required string StatusProcessamento { get; init; }
+
+    [JsonPropertyName("reenfileirado_em")]
+    public required DateTimeOffset ReenfileiradoEm { get; init; }
+
+    /// <summary>Texto pronto para a UI mostrar ao operador.</summary>
+    [JsonPropertyName("message")]
+    public required string Message { get; init; }
 }

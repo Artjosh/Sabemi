@@ -1,6 +1,7 @@
 import type { LoginStatusDto, MagicLinkStartDto, UserDto } from "@/lib/contracts";
 
 import { bffConfig } from "./config";
+import { uuidV7 } from "./ids";
 import { prisma } from "./db";
 import {
   fixedTimeEquals,
@@ -77,12 +78,18 @@ export async function startLogin(rawEmail: unknown): Promise<AuthResult<MagicLin
   const magicToken = generateToken(32);
   const otpCode = generateOtp();
 
+  // Os valores que antes vinham de `@default(...)` agora sao explicitos: com o
+  // schema compartilhado, quem os define e a aplicacao (o EF Core sempre fez
+  // assim). Ter duas fontes de valor para a mesma coluna seria pedir
+  // divergencia entre os dois backends.
   await prisma.loginRequest.create({
     data: {
+      id: uuidV7(),
       email,
       selector,
       magicTokenHash: sha256(magicToken),
       otpCodeHash: sha256(otpCode),
+      otpTentativas: 0,
       status: "PENDENTE",
       criadoEm: agora,
       expiraEm: new Date(agora.getTime() + bffConfig.auth.magicLinkTtlMs),
@@ -236,7 +243,7 @@ export async function purgeExpiredLoginRequests(): Promise<number> {
 async function getOrCreateUser(email: string) {
   return prisma.appUser.upsert({
     where: { email },
-    create: { email },
+    create: { id: uuidV7(), email, criadoEm: new Date() },
     update: {},
   });
 }

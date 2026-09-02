@@ -12,6 +12,17 @@
     <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
     <PackageReference Include="Serilog.Settings.Configuration" Version="10.0.1" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+
+    <!--
+      O worker nao e ASP.NET, entao o /metrics vem de um HttpListener proprio em
+      vez do middleware. Mesmo assim ele PRECISA expor metricas: e nele que a
+      regra pesada roda, e uma fila que para de drenar so aparece aqui.
+    -->
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.18.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.18.0" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.18.0" />
+    <PackageReference Include="OpenTelemetry.Exporter.Prometheus.HttpListener" Version="1.18.0-beta.1" />
+    <PackageReference Include="Npgsql.OpenTelemetry" Version="10.0.3" />
   </ItemGroup>
 
   <ItemGroup>

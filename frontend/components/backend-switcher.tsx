@@ -15,22 +15,20 @@ import { Badge } from "./ui/primitives";
  * um clique. A escolha vira um cookie lido pelo gateway no servidor; a partir
  * da proxima requisicao, tudo passa a ser atendido pela outra implementacao.
  *
- * <b>Por que avisa antes de trocar com sessao aberta.</b> Cada backend tem o
- * proprio banco e, portanto, os proprios usuarios: a sessao atual nao vale no
- * outro. O servidor encerra a sessao na troca (ver `app/api/backend/route.ts`),
- * e essa consequencia e anunciada antes, nao descoberta depois com um 401 sem
- * explicacao.
+ * <b>A troca e imediata e NAO desloga.</b> Os dois backends compartilham o
+ * schema `sabemi` - as mesmas tabelas, os mesmos usuarios e os mesmos
+ * pagamentos - e assinam a sessao com o mesmo segredo. O operador troca de
+ * implementacao e continua exatamente onde estava, vendo os mesmos dados.
  *
- * <b>Recarga completa apos a troca.</b> `window.location.assign` em vez de
- * navegacao do router: a troca muda a origem de TODOS os dados em tela, e
- * remontar a arvore inteira e mais honesto - e mais simples - do que invalidar
+ * <b>Recarga completa apos a troca.</b> `window.location.reload` em vez de
+ * navegacao do router: a troca muda a ORIGEM de todos os dados em tela, e
+ * remontar a arvore inteira e mais simples - e mais honesto - do que invalidar
  * cada consulta em cache uma por uma.
  */
-export function BackendSwitcher({ hasSession }: { hasSession: boolean }) {
+export function BackendSwitcher() {
   const [backends, setBackends] = React.useState<BackendInfo[]>([]);
   const [active, setActive] = React.useState<BackendId | null>(null);
   const [switching, setSwitching] = React.useState<BackendId | null>(null);
-  const [confirming, setConfirming] = React.useState<BackendId | null>(null);
 
   const carregar = React.useCallback(async () => {
     try {
@@ -52,28 +50,23 @@ export function BackendSwitcher({ hasSession }: { hasSession: boolean }) {
     return () => clearInterval(timer);
   }, [carregar]);
 
-  const trocar = React.useCallback(async (id: BackendId) => {
-    setSwitching(id);
-    try {
-      await switchBackend(id);
-      window.location.assign("/");
-    } catch {
-      setSwitching(null);
-      setConfirming(null);
-    }
-  }, []);
+  const selecionar = React.useCallback(
+    async (id: BackendId) => {
+      if (id === active || switching) return;
 
-  const selecionar = (id: BackendId) => {
-    if (id === active || switching) return;
+      setSwitching(id);
+      try {
+        await switchBackend(id);
 
-    // Com sessao aberta, pede confirmacao - a troca vai desloga-lo.
-    if (hasSession) {
-      setConfirming(id);
-      return;
-    }
-
-    void trocar(id);
-  };
+        // Recarrega no MESMO lugar, e nao na raiz: a sessao sobrevive a troca,
+        // entao nao ha razao para tirar o operador de onde ele estava.
+        window.location.reload();
+      } catch {
+        setSwitching(null);
+      }
+    },
+    [active, switching],
+  );
 
   if (backends.length === 0) return null;
 
@@ -100,7 +93,7 @@ export function BackendSwitcher({ hasSession }: { hasSession: boolean }) {
                 role="radio"
                 aria-checked={ativo}
                 disabled={carregando}
-                onClick={() => selecionar(backend.id)}
+                onClick={() => void selecionar(backend.id)}
                 title={`${backend.description}${backend.online ? "" : " — fora do ar"}`}
                 className={cn(
                   "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors",
@@ -124,28 +117,6 @@ export function BackendSwitcher({ hasSession }: { hasSession: boolean }) {
         </div>
       </div>
 
-      {confirming ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-state-warning/30 bg-state-warning-soft px-3 py-2 text-xs text-state-warning">
-          <i className="bi bi-exclamation-triangle-fill" aria-hidden="true" />
-          <span className="flex-1">
-            Cada backend tem seu próprio banco. Trocar encerra sua sessão atual.
-          </span>
-          <button
-            type="button"
-            onClick={() => void trocar(confirming)}
-            className="rounded-md bg-state-warning px-2.5 py-1 font-semibold text-white"
-          >
-            Trocar mesmo assim
-          </button>
-          <button
-            type="button"
-            onClick={() => setConfirming(null)}
-            className="rounded-md px-2 py-1 font-semibold underline"
-          >
-            Cancelar
-          </button>
-        </div>
-      ) : null}
     </div>
   );
 }

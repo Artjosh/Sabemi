@@ -32,6 +32,12 @@ public static class PaymentEndpoints
             .Produces<PaymentEventDetailDto>()
             .Produces<ProblemDetailsDto>(StatusCodes.Status404NotFound);
 
+        group.MapPost("/{transactionId}/reenfileirar", Reenfileirar)
+            .WithSummary("Devolve a fila um evento que falhou")
+            .Produces<RequeueResultDto>()
+            .Produces<ProblemDetailsDto>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetailsDto>(StatusCodes.Status409Conflict);
+
         app.MapGet("/contracts/{contractId}", ObterContrato)
             .WithTags("payments")
             .RequireAuthorization()
@@ -77,6 +83,44 @@ public static class PaymentEndpoints
                 ProblemDetailsDto.Of("Evento nao encontrado.", "payment_event_not_found"),
                 statusCode: StatusCodes.Status404NotFound)
             : Results.Ok(evento);
+    }
+
+    /// <summary>
+    /// Devolve a fila um evento que falhou, por decisao de uma pessoa.
+    /// </summary>
+    /// <remarks>
+    /// <b>POST, e nao PUT.</b> Nao e a atualizacao de um recurso: e o disparo de
+    /// um efeito. Repetir a chamada nao e inofensivo do ponto de vista do
+    /// cliente - a segunda recebe 409 - entao PUT prometeria uma idempotencia
+    /// que este endpoint nao tem.
+    ///
+    /// <b>409, e nao 400.</b> O pedido esta correto; o que impede e o ESTADO
+    /// atual do evento. Um 400 mandaria quem chama procurar erro no proprio
+    /// pedido. E a mensagem do 409 diz qual estado e por que ele impede - e ela
+    /// que o painel mostra ao operador.
+    /// </remarks>
+    private static async Task<IResult> Reenfileirar(
+        string transactionId,
+        PaymentRequeueService requeue,
+        CancellationToken ct)
+    {
+        var resultado = await requeue.RequeueAsync(transactionId, ct);
+
+        if (resultado.Ok)
+        {
+            return Results.Ok(resultado.Value);
+        }
+
+        var (status, codigo) = resultado.Failure switch
+        {
+            PaymentRequeueService.RequeueFailure.NotFound
+                => (StatusCodes.Status404NotFound, "payment_event_not_found"),
+            _ => (StatusCodes.Status409Conflict, "requeue_not_allowed"),
+        };
+
+        return Results.Json(
+            ProblemDetailsDto.Of(resultado.Message ?? "Nao foi possivel reenfileirar.", codigo),
+            statusCode: status);
     }
 
     private static async Task<IResult> ObterContrato(

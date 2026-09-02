@@ -1,0 +1,208 @@
+# =============================================================================
+# Supabase local, em containers.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.supabase.yml up -d
+#
+# (o comando curto e `make up` / `pnpm stack:up` — ver README)
+#
+# O QUE ESTA STACK SUBSTITUI
+# --------------------------
+# O `postgres:17-alpine` do compose base da lugar ao `supabase/postgres`, que e
+# PostgreSQL 15 com as extensoes que a plataforma usa (pgcrypto, pgjwt,
+# pg_stat_statements, uuid-ossp) e os papeis que o GoTrue e o PostgREST esperam.
+#
+# O QUE ELA ACRESCENTA
+# --------------------
+#   kong    - gateway unico da plataforma (porta 54321). E o que faz o Supabase
+#             local e o remoto se comportarem igual: trocar um pelo outro passa
+#             a ser trocar uma URL no .env.
+#   auth    - GoTrue. O SEGUNDO modo de autenticacao da aplicacao (o primeiro e
+#             o polling proprio), reproduzindo os dois modos do projeto de
+#             referencia.
+#   rest    - PostgREST. Os dois backends falam SQL direto e nao dependem dele;
+#             ele existe porque o Studio precisa.
+#   meta    - catalogo do banco para o Studio.
+#   studio  - painel visual em http://localhost:54323.
+#
+# O QUE FICOU DE FORA, E POR QUE
+# ------------------------------
+# Storage, imgproxy, edge-functions e analytics nao sao usados por esta
+# aplicacao. Inclui-los custaria quatro containers e varios GB para servir de
+# enfeite. Realtime tambem ficou fora: o dashboard atualiza por polling, decisao
+# explicada em docs/APRESENTACAO.md.
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------- postgres
+  # Substitui a imagem do compose base.
+  postgres:
+    image: supabase/postgres:15.8.1.060
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+
+      # O GoTrue e o PostgREST assinam e validam tokens com este segredo. Ele
+      # precisa ser o MESMO usado para gerar as chaves anon/service_role.
+      JWT_SECRET: ${SUPABASE_JWT_SECRET:?defina SUPABASE_JWT_SECRET}
+      JWT_EXP: ${SUPABASE_JWT_EXPIRY:-3600}
+    volumes:
+      - supabase_db:/var/lib/postgresql/data
+      # Papeis que a plataforma espera e que a aplicacao usa.
+      - ./supabase/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  # -------------------------------------------------------------------- auth
+  supabase-auth:
+    image: supabase/gotrue:v2.170.0
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: "9999"
+      API_EXTERNAL_URL: ${SUPABASE_URL:-http://localhost:54321}
+
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?search_path=auth
+
+      GOTRUE_SITE_URL: ${FRONTEND_PUBLIC_URL:-http://localhost:3000}
+      GOTRUE_URI_ALLOW_LIST: ${FRONTEND_PUBLIC_URL:-http://localhost:3000}/*,${API_PUBLIC_URL:-http://localhost:8080}/*
+      GOTRUE_DISABLE_SIGNUP: "false"
+
+      GOTRUE_JWT_SECRET: ${SUPABASE_JWT_SECRET:?defina SUPABASE_JWT_SECRET}
+      GOTRUE_JWT_EXP: ${SUPABASE_JWT_EXPIRY:-3600}
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_AUD: authenticated
+
+      # Sem senha: o unico fator e a posse da caixa de e-mail - a mesma decisao
+      # do modo local.
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: ${SUPABASE_MAILER_AUTOCONFIRM:-false}
+      GOTRUE_MAILER_OTP_EXP: "900"
+
+      # SMTP da Brevo. Com as credenciais preenchidas, o GoTrue envia o magic
+      # link de verdade; sem elas, os links aparecem no log do container.
+      GOTRUE_SMTP_HOST: ${SMTP_HOST:-}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT:-587}
+      GOTRUE_SMTP_USER: ${SMTP_USER:-}
+      GOTRUE_SMTP_PASS: ${SMTP_PASSWORD:-}
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_FROM:-nao-responda@sabemi.local}
+      GOTRUE_SMTP_SENDER_NAME: ${SMTP_FROM_NAME:-Sabemi}
+
+      GOTRUE_MAILER_URLPATHS_INVITE: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: /auth/v1/verify
+
+      GOTRUE_LOG_LEVEL: ${SUPABASE_LOG_LEVEL:-info}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9999/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # -------------------------------------------------------------------- rest
+  supabase-rest:
+    image: postgrest/postgrest:v12.2.12
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}
+      PGRST_DB_SCHEMAS: ${SUPABASE_EXPOSED_SCHEMAS:-public,sabemi}
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${SUPABASE_JWT_SECRET:?defina SUPABASE_JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+    command: postgrest
+
+  # -------------------------------------------------------------------- meta
+  supabase-meta:
+    image: supabase/postgres-meta:v0.87.1
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PG_META_PORT: "8080"
+      PG_META_DB_HOST: postgres
+      PG_META_DB_PORT: "5432"
+      PG_META_DB_NAME: ${POSTGRES_DB:-postgres}
+      PG_META_DB_USER: supabase_admin
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+
+  # -------------------------------------------------------------------- kong
+  # A porta unica da plataforma. Tudo o que a aplicacao consome do Supabase
+  # passa por aqui - e e por isso que apontar para o Supabase remoto e so trocar
+  # `SUPABASE_URL` no .env.
+  supabase-kong:
+    image: kong:2.8.1
+    restart: unless-stopped
+    depends_on:
+      supabase-auth:
+        condition: service_healthy
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /home/kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl
+      KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 160k
+      KONG_NGINX_PROXY_PROXY_BUFFERS: 64 160k
+
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?defina SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:?defina SUPABASE_SERVICE_ROLE_KEY}
+    volumes:
+      - ./supabase/kong.yml:/home/kong/template.yml:ro
+    # O Kong nao expande variaveis no arquivo declarativo, entao as chaves sao
+    # injetadas antes de iniciar.
+    #
+    # `sed` e nao o `eval "echo ..."` que o compose oficial do Supabase usa: o
+    # eval reinterpreta TODO o conteudo do arquivo pelo shell, e qualquer
+    # comentario com aspas, cifrao ou parenteses vira comando. Aqui isso
+    # derrubava o Kong com "service_role: command not found". O sed troca texto
+    # e nao interpreta nada.
+    entrypoint: >-
+      bash -c 'sed
+      -e "s|\$${SUPABASE_ANON_KEY}|$${SUPABASE_ANON_KEY}|g"
+      -e "s|\$${SUPABASE_SERVICE_ROLE_KEY}|$${SUPABASE_SERVICE_ROLE_KEY}|g"
+      /home/kong/template.yml > /home/kong/kong.yml
+      && /docker-entrypoint.sh kong docker-start'
+    ports:
+      - "${SUPABASE_PORT:-54321}:8000"
+
+  # ------------------------------------------------------------------ studio
+  supabase-studio:
+    image: supabase/studio:20250113-83c9420
+    restart: unless-stopped
+    depends_on:
+      supabase-meta:
+        condition: service_started
+    environment:
+      STUDIO_PG_META_URL: http://supabase-meta:8080
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+
+      DEFAULT_ORGANIZATION_NAME: Sabemi
+      DEFAULT_PROJECT_NAME: Webhooks de Pagamento
+
+      SUPABASE_URL: http://supabase-kong:8000
+      SUPABASE_PUBLIC_URL: ${SUPABASE_URL:-http://localhost:54321}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?defina SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:?defina SUPABASE_SERVICE_ROLE_KEY}
+
+      AUTH_JWT_SECRET: ${SUPABASE_JWT_SECRET:?defina SUPABASE_JWT_SECRET}
+      LOGFLARE_PRIVATE_ACCESS_TOKEN: nao-utilizado
+      NEXT_PUBLIC_ENABLE_LOGS: "false"
+    ports:
+      - "${SUPABASE_STUDIO_PORT:-54323}:3000"
+
+volumes:
+  supabase_db:
+    driver: local

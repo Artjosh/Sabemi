@@ -68,7 +68,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       ConnectionStrings__Postgres: >-
-        Host=postgres;Port=5432;Database=${POSTGRES_DB:-sabemi};Username=${POSTGRES_USER:-sabemi};Password=${POSTGRES_PASSWORD:-sabemi}
+        Host=postgres;Port=5432;Database=${POSTGRES_DB:-postgres};Username=${APP_DB_USER:-sabemi_app};Password=${APP_DB_PASSWORD:-sabemi};Search Path=sabemi
 
       # SO A API migra o schema `dotnet`. O worker espera. Duas instancias
       # migrando em paralelo disputam o lock de migration do EF Core.
@@ -76,6 +76,11 @@ services:
 
       Jwt__Secret: ${JWT_SECRET:-troque-este-segredo-em-producao-com-no-minimo-32-caracteres}
       Auth__PublicBaseUrl: ${API_PUBLIC_URL:-http://localhost:8080}
+
+      # Tracing. Sem endpoint configurado, o tracing nao sobe; `/metrics`
+      # continua de pe de qualquer forma.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_SERVICE_NAMESPACE: ${OTEL_SERVICE_NAMESPACE:-sabemi}
 
       WebhookSecurity__ApiKey: ${WEBHOOK_API_KEY:-sabemi-dev-api-key}
       WebhookSecurity__SignatureSecret: ${WEBHOOK_SIGNATURE_SECRET:-sabemi-dev-signature-secret}
@@ -88,6 +93,8 @@ services:
       # de logins do mesmo IP em segundos (ver tests/e2e/README.md).
       RateLimit__AuthPermitLimit: ${AUTH_RATE_LIMIT:-10}
     ports:
+      # `/metrics` sai na MESMA porta da API: ele e um endpoint do ASP.NET, e nao
+      # um listener separado como no worker.
       - "${API_PORT:-8080}:8080"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health || exit 1"]
@@ -114,7 +121,7 @@ services:
     environment:
       DOTNET_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       ConnectionStrings__Postgres: >-
-        Host=postgres;Port=5432;Database=${POSTGRES_DB:-sabemi};Username=${POSTGRES_USER:-sabemi};Password=${POSTGRES_PASSWORD:-sabemi}
+        Host=postgres;Port=5432;Database=${POSTGRES_DB:-postgres};Username=${APP_DB_USER:-sabemi_app};Password=${APP_DB_PASSWORD:-sabemi};Search Path=sabemi
 
       Database__MigrateOnStartup: "false"
 
@@ -125,9 +132,24 @@ services:
       Processing__BatchSize: ${PROCESSING_BATCH_SIZE:-10}
       Processing__MaxTentativas: ${PROCESSING_MAX_ATTEMPTS:-3}
 
-    # Sem `ports`: o worker nao atende requisicao alguma. Ele so consome a fila.
-    #
-    # Escale com:  docker compose up -d --scale worker=3
+      # Tracing. Sem endpoint configurado, o tracing simplesmente nao sobe - a
+      # stack continua funcionando sem um coletor no ar.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_SERVICE_NAMESPACE: ${OTEL_SERVICE_NAMESPACE:-sabemi}
+      Metrics__Port: "9464"
+
+    ports:
+      # A UNICA porta do worker, e ela nao atende requisicao de negocio: e o
+      # `/metrics` que o Prometheus raspa. E aqui que a regra pesada roda, e uma
+      # fila que parou de drenar so aparece nesta metrica - o webhook continua
+      # respondendo 202 enquanto nada e processado.
+      #
+      # Ao escalar (`--scale worker=3`), remova o mapeamento fixo: varias
+      # replicas nao podem disputar a mesma porta do host. Em producao quem
+      # descobre as replicas e o service discovery do Prometheus.
+      - "${WORKER_METRICS_PORT:-9464}:9464"
+
+    # Escale com:  docker compose up -d --scale worker=3 (veja a nota acima)
     # As replicas nao brigam pelos mesmos itens - a reivindicacao usa
     # FOR UPDATE SKIP LOCKED (ver Infrastructure/Queue/PostgresJobQueue.cs).
 
@@ -139,13 +161,30 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      api:
+        # A API e dona das migrations do schema compartilhado. O BFF le as
+        # mesmas tabelas, entao precisa esperar elas existirem.
+        condition: service_healthy
     environment:
+      # O VINEXT so serve a build otimizada em `production`. Isso NAO significa
+      # que esta stack e um ambiente de producao - ver AUTH_EXPOSE_LOGIN_CODES
+      # logo abaixo.
       NODE_ENV: production
 
-      # O backend VINEXT e dono do schema `vinext`; o entrypoint aplica as
-      # migrations dele antes de servir.
+      # Esta e a stack de demonstracao do teste tecnico e nao tem provedor de
+      # e-mail configurado por padrao. Sem isto, `NODE_ENV=production` desligaria
+      # a entrega do link/OTP na resposta e nao sobraria caminho algum para
+      # entrar. `docker-compose.prod.yml` fixa "false" e exige e-mail de verdade.
+      AUTH_EXPOSE_LOGIN_CODES: ${AUTH_EXPOSE_LOGIN_CODES:-true}
+
+      # Os DOIS backends usam o mesmo banco e o mesmo schema `sabemi` - e o que
+      # faz o dado aparecer nos dois sem novo login. As migrations sao da API
+      # .NET; o entrypoint apenas espera as tabelas existirem.
+      #
+      # Sem `?schema=`: o Prisma qualifica cada tabela pelo `@@schema` do modelo,
+      # e o driver `pg` interpretava esse parametro como o USUARIO da conexao.
       DATABASE_URL: >-
-        postgresql://${POSTGRES_USER:-sabemi}:${POSTGRES_PASSWORD:-sabemi}@postgres:5432/${POSTGRES_DB:-sabemi}?schema=vinext
+        postgresql://${APP_DB_USER:-sabemi_app}:${APP_DB_PASSWORD:-sabemi}@postgres:5432/${POSTGRES_DB:-postgres}
 
       # Como o SERVIDOR do VINEXT alcanca o backend .NET. Nome de servico, nao
       # localhost: quem faz esta chamada e o container, nao o browser.
@@ -164,14 +203,60 @@ services:
       WEBHOOK_REQUIRE_SIGNATURE: ${WEBHOOK_REQUIRE_SIGNATURE:-false}
 
       PROCESSING_SIMULATED_WORK_MS: ${PROCESSING_SIMULATED_WORK_MS:-2000}
+
+      # Tracing. Sem endpoint configurado, o tracing nao sobe e a stack continua
+      # funcionando sem um coletor no ar.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_SERVICE_NAMESPACE: ${OTEL_SERVICE_NAMESPACE:-sabemi}
+      METRICS_PORT: "9464"
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
+      # `/metrics` em porta separada, e nao em `/api/bff/metrics`: o exportador
+      # Prometheus precisa de um coletor de longa duracao, e o VINEXT executa os
+      # handlers em contexto por requisicao.
+      - "${BFF_METRICS_PORT:-9465}:9464"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/bff/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
+
+  # ---------------------------------------------------------------- tracing
+  #
+  # Jaeger: coletor OTLP + interface para ler os traces.
+  #
+  # <b>Sob um profile, e nao junto com o resto.</b> A stack precisa subir com um
+  # comando so para a avaliacao do teste, e um container a mais que ninguem vai
+  # abrir e memoria gasta a toa. Nada depende dele: sem `OTEL_EXPORTER_OTLP_ENDPOINT`
+  # configurado, os tres servicos simplesmente nao ligam o tracing.
+  #
+  #   docker compose --profile observabilidade up -d
+  #   # e no .env:  OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+  #
+  # Interface em http://localhost:16686
+  #
+  # <b>4318, e nao 4317.</b> 4317 e OTLP/gRPC; 4318 e OTLP/HTTP. O backend .NET
+  # aceita os dois, mas o exportador do BFF (`exporter-trace-otlp-http`) so fala
+  # HTTP - apontar para 4317 faz os traces do VINEXT sumirem em silencio, porque
+  # o exportador falha em segundo plano e nao derruba nada.
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    profiles: ["observabilidade"]
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "${JAEGER_UI_PORT:-16686}:16686"
+      # Nao publicadas no host: quem entrega trace sao os containers, pela rede
+      # interna. Abri-las so aumentaria a superficie exposta.
+      #  - 4317 (OTLP/gRPC), 4318 (OTLP/HTTP)
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:16686/ >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
 volumes:
   postgres_data:

@@ -46,13 +46,23 @@ export const bffConfig = {
     sessionTtlSeconds: envInt("AUTH_SESSION_TTL_HOURS", 24) * 3600,
 
     /**
-     * Devolve link e OTP no corpo, para a demonstracao rodar sem SMTP.
+     * Devolve link e OTP no corpo da resposta, em vez de so por e-mail.
      *
-     * Falha fechada: em producao e sempre `false`, qualquer que seja a
-     * configuracao. A decisao e do servidor e nenhum campo da requisicao a
-     * altera.
+     * <b>Falha fechada, com uma saida explicita.</b> O padrao acompanha o
+     * ambiente - ligado fora de producao, desligado em producao. Nenhum campo da
+     * requisicao a influencia: a decisao e inteiramente do servidor.
+     *
+     * A saida existe porque a versao anterior travava em `!isProduction` e isso
+     * era um beco sem saida: uma imagem de producao sem provedor de e-mail
+     * ficava sem NENHUM caminho de login - o usuario pedia acesso, recebia
+     * `null`, e nao havia como entrar. Quem opera precisa poder dizer "esta
+     * stack e uma demonstracao, entregue o codigo na resposta".
+     *
+     * Ligar em producao e uma decisao consciente e ruidosa: `AUTH_EXPOSE_LOGIN_CODES=true`
+     * escrito a mao, e um aviso a cada inicializacao (ver o alerta abaixo).
+     * `docker-compose.prod.yml` fixa `false`.
      */
-    exposeLoginCodes: !isProduction && env("AUTH_EXPOSE_LOGIN_CODES", "true") === "true",
+    exposeLoginCodes: env("AUTH_EXPOSE_LOGIN_CODES", isProduction ? "false" : "true") === "true",
 
     /** Base publica para montar o link de confirmacao. */
     publicBaseUrl: env("BFF_PUBLIC_BASE_URL", "http://localhost:3000"),
@@ -71,5 +81,17 @@ export const bffConfig = {
     workerEnabled: env("BFF_WORKER_ENABLED", "true") === "true",
   },
 } as const;
+
+// Expor codigo de acesso em producao e legitimo para uma stack de demonstracao,
+// mas nunca deve passar despercebido: se alguem promover esta configuracao a um
+// ambiente real, o aviso esta no primeiro bloco de log da inicializacao.
+if (bffConfig.isProduction && bffConfig.auth.exposeLoginCodes) {
+  console.warn(
+    "[bff-config] AVISO: AUTH_EXPOSE_LOGIN_CODES=true em producao. O link e o " +
+      "codigo de acesso vao no CORPO da resposta de login - qualquer um que " +
+      "chame /auth/acesso com um e-mail entra como aquele e-mail. Use apenas " +
+      "em ambiente de demonstracao.",
+  );
+}
 
 export type BffConfig = typeof bffConfig;

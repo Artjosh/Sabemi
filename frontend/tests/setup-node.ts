@@ -68,7 +68,7 @@ env.BFF_PUBLIC_BASE_URL = "http://localhost:3000";
  * <b>Repare no banco: `sabemi_test`, e nao `sabemi`.</b> Isso nao e detalhe.
  *
  * Com a stack no ar, o container do frontend roda o laco de processamento do
- * BFF contra o schema `vinext` do banco de desenvolvimento. Se a suite usasse o
+ * BFF contra o schema `sabemi` do banco de desenvolvimento. Se a suite usasse o
  * mesmo banco, aquele worker reivindicaria os jobs que os testes acabaram de
  * enfileirar - e as verificacoes de fila falhariam de forma intermitente, com o
  * erro apontando para o codigo em vez de para a interferencia.
@@ -81,4 +81,4 @@ env.BFF_PUBLIC_BASE_URL = "http://localhost:3000";
  *   pnpm db:test:setup
  */
 env.DATABASE_URL =
-  doShell.DATABASE_URL ?? "postgresql://sabemi:sabemi@localhost:5432/sabemi_test?schema=vinext";
+  doShell.DATABASE_URL ?? "postgresql://sabemi_app:sabemi@localhost:5432/sabemi_test";

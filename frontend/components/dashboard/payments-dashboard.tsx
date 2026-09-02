@@ -3,7 +3,11 @@
 import * as React from "react";
 
 import { useAuth } from "@/components/auth-provider";
-import { ActiveBackendBadge, BackendSwitcher } from "@/components/backend-switcher";
+import {
+  ActiveBackendBadge,
+  BackendSwitcher,
+} from "@/components/backend-switcher";
+import { FailureTooltip } from "@/components/dashboard/failure-tooltip";
 import { PaymentDetailDialog } from "@/components/dashboard/payment-detail-dialog";
 import { SummaryCards } from "@/components/dashboard/summary-cards";
 import { Button } from "@/components/ui/button";
@@ -31,7 +35,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ApiError, getHealth, getPaymentSummary, listPayments } from "@/lib/api-client";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import {
+  ApiError,
+  getHealth,
+  getPaymentSummary,
+  listPayments,
+} from "@/lib/api-client";
 import type {
   BackendId,
   PagedResult,
@@ -40,7 +50,12 @@ import type {
   ProcessingStatus,
 } from "@/lib/contracts";
 import { PROCESSING_STATUSES, STATUS_LABELS } from "@/lib/contracts";
-import { cn, formatCurrency, formatDateTime, formatRelative } from "@/lib/utils";
+import {
+  cn,
+  formatCurrency,
+  formatDateTime,
+  formatRelative,
+} from "@/lib/utils";
 
 /**
  * Dashboard administrativo.
@@ -68,7 +83,8 @@ const TODOS = "__todos__";
 export function PaymentsDashboard() {
   const { user, logout } = useAuth();
 
-  const [pagina, setPagina] = React.useState<PagedResult<PaymentEventDto> | null>(null);
+  const [pagina, setPagina] =
+    React.useState<PagedResult<PaymentEventDto> | null>(null);
   const [resumo, setResumo] = React.useState<PaymentSummaryDto | null>(null);
   const [backendReal, setBackendReal] = React.useState<BackendId | null>(null);
 
@@ -81,7 +97,9 @@ export function PaymentsDashboard() {
   const [erro, setErro] = React.useState<string | null>(null);
   const [atualizandoAgora, setAtualizandoAgora] = React.useState(false);
   const [autoRefresh, setAutoRefresh] = React.useState(true);
-  const [ultimaAtualizacao, setUltimaAtualizacao] = React.useState<Date | null>(null);
+  const [ultimaAtualizacao, setUltimaAtualizacao] = React.useState<Date | null>(
+    null,
+  );
   const [detalhe, setDetalhe] = React.useState<string | null>(null);
 
   // Debounce do filtro por contrato: sem ele, cada tecla dispararia uma consulta.
@@ -100,7 +118,10 @@ export function PaymentsDashboard() {
       try {
         const [dados, totais] = await Promise.all([
           listPayments({
-            status: statusFiltro === TODOS ? null : (statusFiltro as ProcessingStatus),
+            status:
+              statusFiltro === TODOS
+                ? null
+                : (statusFiltro as ProcessingStatus),
             contractId: contratoFiltro || null,
             page,
             pageSize: PAGE_SIZE,
@@ -119,7 +140,11 @@ export function PaymentsDashboard() {
           window.location.assign("/login");
           return;
         }
-        setErro(error instanceof ApiError ? error.message : "Falha ao carregar os pagamentos.");
+        setErro(
+          error instanceof ApiError
+            ? error.message
+            : "Falha ao carregar os pagamentos.",
+        );
       } finally {
         setCarregandoInicial(false);
         setAtualizandoAgora(false);
@@ -154,224 +179,257 @@ export function PaymentsDashboard() {
   };
 
   const temFiltro = statusFiltro !== TODOS || contratoFiltro !== "";
-  const totalPaginas = pagina ? Math.max(1, Math.ceil(pagina.total / pagina.page_size)) : 1;
+  const totalPaginas = pagina
+    ? Math.max(1, Math.ceil(pagina.total / pagina.page_size))
+    : 1;
 
   return (
-    <div className="min-h-screen">
-      {/* O grid do Bootstrap organiza o esqueleto responsivo; o estilo e todo
+    // Um unico Provider para a tela inteira. O Radix exige um ancestral; um por
+    // linha da tabela criaria vinte contextos identicos e cada um com o proprio
+    // temporizador de atraso.
+    <TooltipProvider>
+      <div className="min-h-screen">
+        {/* O grid do Bootstrap organiza o esqueleto responsivo; o estilo e todo
           Tailwind. Ver a divisao de responsabilidades em app/globals.css. */}
-      <header className="border-b border-border-subtle bg-surface">
-        <div className="container-fluid px-3 px-lg-4">
-          <div className="row align-items-center gy-2 py-3">
-            <div className="col-12 col-lg-4">
-              <div className="flex items-center gap-2.5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand text-white">
-                  <i className="bi bi-receipt-cutoff" aria-hidden="true" />
-                </div>
-                <div className="min-w-0">
-                  <h1 className="truncate text-sm font-semibold leading-tight">
-                    Painel de Pagamentos
-                  </h1>
-                  <p className="truncate text-xs text-[color:var(--muted-foreground)]">
-                    {user?.email ?? "—"}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="col-12 col-lg-5">
-              <div className="flex flex-wrap items-center gap-2 lg:justify-center">
-                <BackendSwitcher hasSession={Boolean(user)} />
-                <ActiveBackendBadge backend={backendReal} />
-              </div>
-            </div>
-
-            <div className="col-12 col-lg-3">
-              <div className="flex items-center justify-start gap-2 lg:justify-end">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setAutoRefresh((v) => !v)}
-                  title={autoRefresh ? "Pausar atualização automática" : "Retomar atualização automática"}
-                >
-                  <i
-                    className={cn("bi", autoRefresh ? "bi-pause-fill" : "bi-play-fill")}
-                    aria-hidden="true"
-                  />
-                  {autoRefresh ? "Pausar" : "Retomar"}
-                </Button>
-
-                <Button variant="outline" size="sm" onClick={() => void buscar(false)}>
-                  <i
-                    className={cn("bi bi-arrow-clockwise", atualizandoAgora && "animate-spin")}
-                    aria-hidden="true"
-                  />
-                  Atualizar
-                </Button>
-
-                <Button variant="ghost" size="sm" onClick={() => void logout()}>
-                  <i className="bi bi-box-arrow-right" aria-hidden="true" />
-                  Sair
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <main className="container-fluid px-3 px-lg-4 py-4">
-        <SummaryCards resumo={resumo} carregando={carregandoInicial} />
-
-        {erro ? (
-          <Alert tone="error" icon="bi-wifi-off" className="mb-4">
-            <p className="font-semibold">Não foi possível atualizar</p>
-            <p className="text-xs">{erro}</p>
-          </Alert>
-        ) : null}
-
-        <Card>
-          <CardHeader className="gap-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <CardTitle>Eventos recebidos</CardTitle>
-              <span className="text-xs text-[color:var(--muted-foreground)]" aria-live="polite">
-                {ultimaAtualizacao
-                  ? `Atualizado ${formatRelative(ultimaAtualizacao.toISOString())}`
-                  : "—"}
-                {autoRefresh ? " · atualização automática ativa" : " · pausado"}
-              </span>
-            </div>
-
-            {/* Os dois filtros exigidos pela task: situacao e contrato. */}
-            <div className="row gy-2 gx-2">
-              <div className="col-12 col-md-4 col-xl-3">
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="filtro-status">Status</Label>
-                  <Select
-                    value={statusFiltro}
-                    onValueChange={(v) => {
-                      setStatusFiltro(v);
-                      setPage(1);
-                    }}
-                  >
-                    <SelectTrigger id="filtro-status" aria-label="Filtrar por status">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={TODOS}>Todos os status</SelectItem>
-                      {PROCESSING_STATUSES.map((status) => (
-                        <SelectItem key={status} value={status}>
-                          {STATUS_LABELS[status]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+        <header className="border-b border-border-subtle bg-surface">
+          <div className="container-fluid px-3 px-lg-4">
+            <div className="row align-items-center gy-2 py-3">
+              <div className="col-12 col-lg-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand text-white">
+                    <i className="bi bi-receipt-cutoff" aria-hidden="true" />
+                  </div>
+                  <div className="min-w-0">
+                    <h1 className="truncate text-sm font-semibold leading-tight">
+                      Painel de Pagamentos
+                    </h1>
+                    <p className="truncate text-xs text-[color:var(--muted-foreground)]">
+                      {user?.email ?? "—"}
+                    </p>
+                  </div>
                 </div>
               </div>
 
-              <div className="col-12 col-md-5 col-xl-4">
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="filtro-contrato">ID do contrato</Label>
-                  <Input
-                    id="filtro-contrato"
-                    placeholder="CTR-00000"
-                    value={contratoInput}
-                    onChange={(e) => setContratoInput(e.target.value)}
-                  />
+              <div className="col-12 col-lg-5">
+                <div className="flex flex-wrap items-center gap-2 lg:justify-center">
+                  <BackendSwitcher />
+                  <ActiveBackendBadge backend={backendReal} />
                 </div>
               </div>
 
-              <div className="col-12 col-md-3 col-xl-2">
-                <div className="flex h-full flex-col justify-end">
+              <div className="col-12 col-lg-3">
+                <div className="flex items-center justify-start gap-2 lg:justify-end">
                   <Button
-                    variant="subtle"
-                    onClick={limparFiltros}
-                    disabled={!temFiltro}
-                    className="w-full"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setAutoRefresh((v) => !v)}
+                    title={
+                      autoRefresh
+                        ? "Pausar atualização automática"
+                        : "Retomar atualização automática"
+                    }
                   >
-                    <i className="bi bi-x-circle" aria-hidden="true" />
-                    Limpar filtros
+                    <i
+                      className={cn(
+                        "bi",
+                        autoRefresh ? "bi-pause-fill" : "bi-play-fill",
+                      )}
+                      aria-hidden="true"
+                    />
+                    {autoRefresh ? "Pausar" : "Retomar"}
+                  </Button>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void buscar(false)}
+                  >
+                    <i
+                      className={cn(
+                        "bi bi-arrow-clockwise",
+                        atualizandoAgora && "animate-spin",
+                      )}
+                      aria-hidden="true"
+                    />
+                    Atualizar
+                  </Button>
+
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void logout()}
+                  >
+                    <i className="bi bi-box-arrow-right" aria-hidden="true" />
+                    Sair
                   </Button>
                 </div>
               </div>
             </div>
-          </CardHeader>
+          </div>
+        </header>
 
-          <CardContent className="px-0 pb-0">
-            {carregandoInicial ? (
-              <div className="flex flex-col gap-2 px-5 pb-5">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <Skeleton key={i} className="h-12 w-full" />
-                ))}
+        <main className="container-fluid px-3 px-lg-4 py-4">
+          <SummaryCards resumo={resumo} carregando={carregandoInicial} />
+
+          {erro ? (
+            <Alert tone="error" icon="bi-wifi-off" className="mb-4">
+              <p className="font-semibold">Não foi possível atualizar</p>
+              <p className="text-xs">{erro}</p>
+            </Alert>
+          ) : null}
+
+          <Card>
+            <CardHeader className="gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <CardTitle>Eventos recebidos</CardTitle>
+                <span
+                  className="text-xs text-[color:var(--muted-foreground)]"
+                  aria-live="polite"
+                >
+                  {ultimaAtualizacao
+                    ? `Atualizado ${formatRelative(ultimaAtualizacao.toISOString())}`
+                    : "—"}
+                  {autoRefresh
+                    ? " · atualização automática ativa"
+                    : " · pausado"}
+                </span>
               </div>
-            ) : pagina && pagina.items.length > 0 ? (
-              <>
-                <Table>
-                  <TableHeader>
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead>Status</TableHead>
-                      <TableHead>ID transação</TableHead>
-                      <TableHead>Contrato</TableHead>
-                      <TableHead className="text-right">Valor</TableHead>
-                      <TableHead>Pagamento</TableHead>
-                      <TableHead>Recebido</TableHead>
-                      <TableHead className="text-center">Tent.</TableHead>
-                      <TableHead className="text-right">Ações</TableHead>
-                    </TableRow>
-                  </TableHeader>
 
-                  <TableBody>
-                    {pagina.items.map((evento) => (
-                      <PaymentRow
-                        key={evento.id}
-                        evento={evento}
-                        onDetalhe={() => setDetalhe(evento.id_transacao)}
-                      />
-                    ))}
-                  </TableBody>
-                </Table>
-
-                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle px-5 py-3 text-sm">
-                  <span className="text-[color:var(--muted-foreground)]">
-                    {pagina.total} evento{pagina.total === 1 ? "" : "s"} · página {pagina.page} de{" "}
-                    {totalPaginas}
-                  </span>
-
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={pagina.page <= 1}
-                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+              {/* Os dois filtros exigidos pela task: situacao e contrato. */}
+              <div className="row gy-2 gx-2">
+                <div className="col-12 col-md-4 col-xl-3">
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="filtro-status">Status</Label>
+                    <Select
+                      value={statusFiltro}
+                      onValueChange={(v) => {
+                        setStatusFiltro(v);
+                        setPage(1);
+                      }}
                     >
-                      <i className="bi bi-chevron-left" aria-hidden="true" />
-                      Anterior
-                    </Button>
+                      <SelectTrigger
+                        id="filtro-status"
+                        aria-label="Filtrar por status"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={TODOS}>Todos os status</SelectItem>
+                        {PROCESSING_STATUSES.map((status) => (
+                          <SelectItem key={status} value={status}>
+                            {STATUS_LABELS[status]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="col-12 col-md-5 col-xl-4">
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="filtro-contrato">ID do contrato</Label>
+                    <Input
+                      id="filtro-contrato"
+                      placeholder="CTR-00000"
+                      value={contratoInput}
+                      onChange={(e) => setContratoInput(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="col-12 col-md-3 col-xl-2">
+                  <div className="flex h-full flex-col justify-end">
                     <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={pagina.page >= totalPaginas}
-                      onClick={() => setPage((p) => p + 1)}
+                      variant="subtle"
+                      onClick={limparFiltros}
+                      disabled={!temFiltro}
+                      className="w-full"
                     >
-                      Próxima
-                      <i className="bi bi-chevron-right" aria-hidden="true" />
+                      <i className="bi bi-x-circle" aria-hidden="true" />
+                      Limpar filtros
                     </Button>
                   </div>
                 </div>
-              </>
-            ) : (
-              <EmptyState temFiltro={temFiltro} onLimpar={limparFiltros} />
-            )}
-          </CardContent>
-        </Card>
-      </main>
+              </div>
+            </CardHeader>
 
-      <PaymentDetailDialog
-        idTransacao={detalhe}
-        onOpenChange={(aberto) => {
-          if (!aberto) setDetalhe(null);
-        }}
-      />
-    </div>
+            <CardContent className="px-0 pb-0">
+              {carregandoInicial ? (
+                <div className="flex flex-col gap-2 px-5 pb-5">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <Skeleton key={i} className="h-12 w-full" />
+                  ))}
+                </div>
+              ) : pagina && pagina.items.length > 0 ? (
+                <>
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead>Status</TableHead>
+                        <TableHead>ID transação</TableHead>
+                        <TableHead>Contrato</TableHead>
+                        <TableHead className="text-right">Valor</TableHead>
+                        <TableHead>Pagamento</TableHead>
+                        <TableHead>Recebido</TableHead>
+                        <TableHead className="text-center">Tent.</TableHead>
+                        <TableHead className="text-right">Ações</TableHead>
+                      </TableRow>
+                    </TableHeader>
+
+                    <TableBody>
+                      {pagina.items.map((evento) => (
+                        <PaymentRow
+                          key={evento.id}
+                          evento={evento}
+                          onDetalhe={() => setDetalhe(evento.id_transacao)}
+                        />
+                      ))}
+                    </TableBody>
+                  </Table>
+
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle px-5 py-3 text-sm">
+                    <span className="text-[color:var(--muted-foreground)]">
+                      {pagina.total} evento{pagina.total === 1 ? "" : "s"} ·
+                      página {pagina.page} de {totalPaginas}
+                    </span>
+
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={pagina.page <= 1}
+                        onClick={() => setPage((p) => Math.max(1, p - 1))}
+                      >
+                        <i className="bi bi-chevron-left" aria-hidden="true" />
+                        Anterior
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={pagina.page >= totalPaginas}
+                        onClick={() => setPage((p) => p + 1)}
+                      >
+                        Próxima
+                        <i className="bi bi-chevron-right" aria-hidden="true" />
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <EmptyState temFiltro={temFiltro} onLimpar={limparFiltros} />
+              )}
+            </CardContent>
+          </Card>
+        </main>
+
+        <PaymentDetailDialog
+          idTransacao={detalhe}
+          onOpenChange={(aberto) => {
+            if (!aberto) setDetalhe(null);
+          }}
+        />
+      </div>
+    </TooltipProvider>
   );
 }
 
@@ -383,15 +441,26 @@ export function PaymentsDashboard() {
  * processamento) e INVALIDO (reprovado na validacao) e mantida: sao causas
  * diferentes e exigem acoes diferentes, embora as duas exijam atencao.
  */
-function PaymentRow({ evento, onDetalhe }: { evento: PaymentEventDto; onDetalhe: () => void }) {
-  const comProblema = evento.status_processamento === "ERRO" || evento.status_processamento === "INVALIDO";
+function PaymentRow({
+  evento,
+  onDetalhe,
+}: {
+  evento: PaymentEventDto;
+  onDetalhe: () => void;
+}) {
+  const comProblema =
+    evento.status_processamento === "ERRO" ||
+    evento.status_processamento === "INVALIDO";
 
   return (
     <TableRow className={cn(comProblema && "bg-state-error-soft/40")}>
       <TableCell>
         <div className="flex items-center gap-2">
           {comProblema ? (
-            <span className="h-8 w-1 shrink-0 rounded-full bg-state-error" aria-hidden="true" />
+            <span
+              className="h-8 w-1 shrink-0 rounded-full bg-state-error"
+              aria-hidden="true"
+            />
           ) : null}
           <StatusBadge status={evento.status_processamento} />
         </div>
@@ -399,7 +468,9 @@ function PaymentRow({ evento, onDetalhe }: { evento: PaymentEventDto; onDetalhe:
 
       <TableCell className="font-mono text-xs">{evento.id_transacao}</TableCell>
 
-      <TableCell className="font-mono text-xs">{evento.id_contrato ?? "—"}</TableCell>
+      <TableCell className="font-mono text-xs">
+        {evento.id_contrato ?? "—"}
+      </TableCell>
 
       <TableCell className="tabular text-right font-medium">
         {formatCurrency(evento.valor)}
@@ -409,26 +480,40 @@ function PaymentRow({ evento, onDetalhe }: { evento: PaymentEventDto; onDetalhe:
         {formatDateTime(evento.data_pagamento)}
       </TableCell>
 
-      <TableCell className="whitespace-nowrap text-xs" title={formatDateTime(evento.recebido_em)}>
+      <TableCell
+        className="whitespace-nowrap text-xs"
+        title={formatDateTime(evento.recebido_em)}
+      >
         {formatRelative(evento.recebido_em)}
       </TableCell>
 
-      <TableCell className="tabular text-center text-xs">{evento.tentativas}</TableCell>
+      <TableCell className="tabular text-center text-xs">
+        {evento.tentativas}
+      </TableCell>
 
       <TableCell className="text-right">
         <div className="flex items-center justify-end gap-1">
-          {/* O motivo do erro fica visivel sem precisar abrir o detalhe: e a
-              informacao que o operador procura ao ver uma linha vermelha. */}
-          {evento.erro ? (
-            <span
-              className="max-w-[16rem] truncate text-xs text-state-error"
-              title={evento.erro}
-            >
-              {evento.erro}
-            </span>
+          {/* A CAUSA fica visivel sem precisar abrir o detalhe: e a informacao
+              que o operador procura ao ver uma linha vermelha.
+
+              Antes, esta celula mostrava a mensagem crua da excecao truncada em
+              16rem - algo como "23503: insert or update on table..." cortado no
+              meio. Agora mostra a leitura, e o tooltip traz a explicacao inteira
+              mais o que fazer. A mensagem tecnica continua a um clique, no
+              detalhe do evento, que e onde ela serve. */}
+          {evento.diagnostico ? (
+            <FailureTooltip
+              diagnostico={evento.diagnostico}
+              mensagemTecnica={evento.erro}
+            />
           ) : null}
 
-          <Button variant="ghost" size="icon" onClick={onDetalhe} aria-label="Ver detalhes">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onDetalhe}
+            aria-label="Ver detalhes"
+          >
             <i className="bi bi-eye" aria-hidden="true" />
           </Button>
         </div>
@@ -437,16 +522,27 @@ function PaymentRow({ evento, onDetalhe }: { evento: PaymentEventDto; onDetalhe:
   );
 }
 
-function EmptyState({ temFiltro, onLimpar }: { temFiltro: boolean; onLimpar: () => void }) {
+function EmptyState({
+  temFiltro,
+  onLimpar,
+}: {
+  temFiltro: boolean;
+  onLimpar: () => void;
+}) {
   return (
     <div className="flex flex-col items-center gap-3 px-5 py-16 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-muted">
-        <i className="bi bi-inbox text-xl text-[color:var(--muted-foreground)]" aria-hidden="true" />
+        <i
+          className="bi bi-inbox text-xl text-[color:var(--muted-foreground)]"
+          aria-hidden="true"
+        />
       </div>
 
       <div>
         <p className="font-medium">
-          {temFiltro ? "Nenhum evento com esses filtros" : "Nenhum evento recebido ainda"}
+          {temFiltro
+            ? "Nenhum evento com esses filtros"
+            : "Nenhum evento recebido ainda"}
         </p>
         <p className="mt-1 text-sm text-[color:var(--muted-foreground)]">
           {temFiltro
