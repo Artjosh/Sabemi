@@ -206,8 +206,6 @@ de transcrição aparecendo como falha de autenticação em apenas um dos backen
 | Variável | Para que serve |
 | --- | --- |
 | `AUTH_PROVIDER` | `local` (magic link próprio) ou `supabase` (GoTrue) |
-| `AUTH_EXPOSE_LOGIN_CODES` | Entrega link e código na resposta |
-| `AUTH_RATE_LIMIT` | Pedidos de login por minuto, por IP |
 | `JWT_SECRET` | Assina a sessão. Mín. 32 caracteres, **o mesmo nos dois backends** |
 | `API_PUBLIC_URL` / `FRONTEND_PUBLIC_URL` | Base do link de acesso |
 
@@ -230,7 +228,16 @@ limite para todo mundo seria pior.
 | --- | --- |
 | `BREVO_API_KEY` | Ativa o envio real. Vazio = link vai só para o log |
 | `BREVO_SENDER_EMAIL` | Remetente. Precisa ser de um domínio **verificado** na Brevo |
-| `SMTP_*` | Usadas **pelo GoTrue**, não pelos backends |
+| `SMTP_HOST` / `SMTP_USER` / `SMTP_PASSWORD` | Usadas **pelo GoTrue**, não pelos backends |
+
+> **A Brevo tem duas chaves diferentes, e elas não se substituem.**
+>
+> | Chave | Prefixo | Onde pegar | Quem usa |
+> | --- | --- | --- | --- |
+> | API v3 | `xkeysib-` | Settings → API keys | Os dois backends (`BREVO_API_KEY`) |
+> | SMTP | `xsmtpsib-` | Settings → SMTP | O GoTrue (`SMTP_PASSWORD`) |
+>
+> Pôr a chave SMTP em `BREVO_API_KEY` devolve `401` da API v3.
 
 Os dois backends usam a **mesma conta e o mesmo remetente**: o e-mail de acesso é
 o mesmo produto, venha de qual backend vier.
@@ -275,17 +282,41 @@ A `ApiKey` diz **quem** está chamando; a assinatura diz que o **corpo está
 intacto**. Em produção deixe `WEBHOOK_REQUIRE_SIGNATURE=true` — a ApiKey sozinha
 não protege o conteúdo.
 
-### Processamento
+### Ajuste fino (não estão no `.env`)
 
-| Variável | Para que serve |
-| --- | --- |
-| `PROCESSING_SIMULATED_WORK` / `_MS` | A regra pesada simulada (~2 s) |
-| `PROCESSING_BATCH_SIZE` | Itens reivindicados por ciclo |
-| `PROCESSING_MAX_ATTEMPTS` | Tentativas antes da falha definitiva |
+Estas têm default no código e no compose. Só defina se precisar mudar:
 
-Há duas variáveis para a duração porque os formatos diferem: o .NET usa
-`TimeSpan` (`00:00:02`) e o Node, milissegundos. **É este o tempo que o webhook
-não paga** — ele responde antes, e o processamento acontece em outro processo.
+| Variável | Default | Para que serve |
+| --- | --- | --- |
+| `PROCESSING_SIMULATED_WORK_MS` | `2000` | A regra pesada simulada |
+| `PROCESSING_BATCH_SIZE` | `10` (.NET) / `5` (BFF) | Itens reivindicados por ciclo |
+| `PROCESSING_MAX_ATTEMPTS` | `3` | Tentativas antes da falha definitiva |
+| `AUTH_RATE_LIMIT` | `10` | Pedidos de login por minuto, por IP |
+| `AUTH_EXPOSE_LOGIN_CODES` | segue o ambiente | Entrega link e código na resposta |
+| `WEBHOOK_REQUIRE_SIGNATURE` | `false` | Exige `X-Signature` em toda chamada |
+| `API_PORT` / `FRONTEND_PORT` / `POSTGRES_PORT` | `8080` / `3000` / `5432` | Portas no host |
+| `SUPABASE_PORT` / `SUPABASE_STUDIO_PORT` | `54321` / `54323` | Portas da plataforma |
+| `POSTGRES_USER` / `POSTGRES_DB` | `postgres` | Superusuário e banco |
+| `APP_DB_USER` | `sabemi_app` | Papel da aplicação |
+| `OTEL_SERVICE_NAMESPACE` | `sabemi` | Agrupa os serviços no coletor |
+| `BREVO_SENDER_NAME` | `Sabemi` | Nome exibido no remetente |
+| `SMTP_PORT` / `SMTP_FROM` | `587` / `nao-responda@…` | Do GoTrue |
+
+Use-as na linha de comando quando for pontual:
+
+```bash
+AUTH_RATE_LIMIT=500 docker compose up -d     # o que a suíte E2E faz
+```
+
+**Sobre `PROCESSING_SIMULATED_WORK_MS`:** é este o tempo que o webhook **não
+paga** — ele responde antes, e o processamento acontece em outro processo.
+
+Até pouco tempo eram *duas* variáveis para o mesmo número
+(`PROCESSING_SIMULATED_WORK=00:00:02` para o .NET e `_MS=2000` para o Node),
+porque os formatos diferiam. Mudar uma sem a outra fazia os dois backends
+simularem durações diferentes — a pior divergência possível num projeto que
+existe para provar que eles são equivalentes. Hoje o .NET converte de
+milissegundos.
 
 ### Observabilidade
 

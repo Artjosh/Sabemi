@@ -23,10 +23,24 @@ public sealed class ProcessingOptions
     public TimeSpan BaseRetryDelay { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
-    /// Duracao da regra de negocio simulada. A task pede ~2s de processamento
-    /// pesado; e este valor que o webhook NAO paga, por rodar em outro processo.
+    /// Duracao da regra de negocio simulada, em MILISSEGUNDOS. A task pede ~2s de
+    /// processamento pesado; e este valor que o webhook NAO paga, por rodar em
+    /// outro processo.
     /// </summary>
-    public TimeSpan SimulatedWorkDuration { get; set; } = TimeSpan.FromSeconds(2);
+    /// <remarks>
+    /// <b>Por que milissegundos e nao <c>TimeSpan</c>.</b> O backend VINEXT le a
+    /// mesma configuracao e so entende numero. Enquanto isto era um
+    /// <c>TimeSpan</c>, o ambiente precisava de DUAS variaveis para o mesmo
+    /// valor - <c>PROCESSING_SIMULATED_WORK=00:00:02</c> e
+    /// <c>PROCESSING_SIMULATED_WORK_MS=2000</c> - e mudar uma sem a outra fazia
+    /// os dois backends simularem duracoes diferentes. Em um projeto cujo ponto
+    /// e provar que os dois sao equivalentes, essa era a pior divergencia
+    /// possivel: silenciosa e no proprio mecanismo sob teste.
+    /// </remarks>
+    public int SimulatedWorkMs { get; set; } = 2000;
+
+    /// <summary>A mesma duracao, para quem precisa de <see cref="TimeSpan"/>.</summary>
+    public TimeSpan SimulatedWorkDuration => TimeSpan.FromMilliseconds(SimulatedWorkMs);
 
     /// <summary>Itens reivindicados por ciclo do worker.</summary>
     public int BatchSize { get; set; } = 10;

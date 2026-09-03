@@ -37,19 +37,33 @@ services:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-sabemi}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sabemi}
-      POSTGRES_DB: ${POSTGRES_DB:-sabemi}
+      # `postgres`/`postgres` e nao `sabemi`/`sabemi`: sao os mesmos nomes que o
+      # overlay do Supabase usa. Enquanto os dois discordavam, subir a stack sem
+      # o overlay criava um banco `sabemi` enquanto os backends conectavam em
+      # `postgres` - e o `.env`, que definia os dois valores, escondia isso.
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
     ports:
       # Exposto para inspecionar o banco durante a demonstracao. Em producao
       # esta linha sai: so a rede interna precisa alcancar o PostgreSQL.
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      # O MESMO init do overlay do Supabase, e por um motivo pratico: e ele que
+      # cria o papel `sabemi_app` e o schema `sabemi`, que os backends usam.
+      # Sem esta linha, `docker compose up` sem o overlay subia um banco onde o
+      # usuario da aplicacao nao existia - e o README recomendava exatamente
+      # esse comando.
+      #
+      # Os scripts sao idempotentes e o `00-papeis-da-plataforma.sql` cria
+      # papeis que so a plataforma usa; num Postgres puro eles ficam ociosos,
+      # o que e mais barato do que manter dois conjuntos de init divergindo.
+      - ./supabase/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       # Os demais servicos aguardam este healthcheck. Sem ele, a API tentaria
       # migrar contra um banco que ainda esta inicializando.
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sabemi} -d ${POSTGRES_DB:-sabemi}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-postgres}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -164,7 +178,7 @@ services:
       Jwt__Secret: ${JWT_SECRET:-troque-este-segredo-em-producao-com-no-minimo-32-caracteres}
 
       # A regra pesada exigida pela task. Este e o tempo que o webhook NAO paga.
-      Processing__SimulatedWorkDuration: ${PROCESSING_SIMULATED_WORK:-00:00:02}
+      Processing__SimulatedWorkMs: ${PROCESSING_SIMULATED_WORK_MS:-2000}
       Processing__BatchSize: ${PROCESSING_BATCH_SIZE:-10}
       Processing__MaxTentativas: ${PROCESSING_MAX_ATTEMPTS:-3}
 

@@ -1008,8 +1008,12 @@ passo pronto e inerte é mais honesto do que fingir uma publicação.
 nos dois backends e é ativado por `BREVO_API_KEY`. Sem a chave, o link de acesso
 vai para o log do servidor e, em desenvolvimento, para a tela. A escolha é
 deliberada: exigir credenciais para rodar `docker compose up` seria um obstáculo
-sem propósito na avaliação. **Nunca houve uma chave real neste repositório** — a
-integração foi verificada contra um servidor HTTP falso, não contra a Brevo.
+sem propósito na avaliação.
+
+A Brevo tem duas chaves: a de **SMTP** (`xsmtpsib-`), usada pelo GoTrue, foi
+configurada e o envio verificado de ponta a ponta. A da **API v3** (`xkeysib-`),
+usada pelos dois backends no modo local, ainda não — essa integração foi
+verificada contra um servidor HTTP falso, não contra a Brevo.
 
 **Modo Supabase sem SMTP.** Com `AUTH_PROVIDER=supabase` e sem SMTP configurado,
 o link de acesso fica no log do *container do GoTrue*, e não na resposta — ele é

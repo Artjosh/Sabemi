@@ -69,7 +69,7 @@ public class ProcessingTests(PostgresFixture postgres) : IAsyncLifetime
         {
             MaxTentativas = maxTentativas,
             BaseRetryDelay = TimeSpan.FromSeconds(5),
-            SimulatedWorkDuration = TimeSpan.Zero,
+            SimulatedWorkMs = 0,
             BatchSize = 10,
             VisibilityTimeout = visibilityTimeout ?? TimeSpan.FromMinutes(2),
         });
