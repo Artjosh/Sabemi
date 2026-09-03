@@ -851,16 +851,16 @@ publicados, e rodam com **usuário sem privilégios**.
 
 ## 16. Testes
 
-**642 testes.** Cobertura de **83,8 %** no backend .NET e **89,2 %** de linhas no
+**683 testes.** Cobertura de **84,0 %** no backend .NET e **89,1 %** de linhas no
 frontend — ambos acima do mínimo de 80 % exigido, verificado no pipeline.
 
 | Suíte                  | Testes  | Ambiente                                    |
 | ---------------------- | ------- | ------------------------------------------- |
-| .NET — unidade         | 170     | Sem I/O: domínio, validação, HMAC, clientes HTTP com handler falso |
+| .NET — unidade         | 189     | Sem I/O: domínio, validação, HMAC, clientes HTTP com handler falso |
 | .NET — integração      | 86      | PostgreSQL real (Testcontainers)            |
-| Frontend — node        | 282     | PostgreSQL real                             |
+| Frontend — node        | 302     | PostgreSQL real                             |
 | Frontend — componentes | 54      | jsdom + Testing Library                     |
-| **Ponta a ponta**      | **50**  | **Stack em containers, pela rede**          |
+| **Ponta a ponta**      | **52**  | **Stack em containers, pela rede**          |
 
 > A cobertura do .NET era de 98 % antes da observabilidade, do cliente Brevo e do
 > provedor GoTrue entrarem. O código novo tem testes, mas os caminhos de
@@ -882,38 +882,44 @@ nenhum outro nível alcança:
   backends, com a mesma mensagem — a proteção que impede dois cliques de dobrar
   o valor liquidado de um contrato.
 
-### O teste que não deve rodar, e como pular sem mentir
+### O teste que causou dano, e as duas respostas erradas antes da certa
 
-A suíte E2E autentica com endereços inventados. Se a stack tiver provedor de
-e-mail configurado, ela envia para eles de verdade — e cada um vira um **hard
-bounce**, que é exatamente o que corrói reputação de envio. Aconteceu neste
-projeto: uma execução com SMTP ativo gerou 26 bounces antes de alguém perceber.
+A suíte ponta a ponta autentica dezenas de vezes por execução, com endereços
+inventados. Eles eram inventados em `@sabemi.com.br` — domínio real. Uma execução
+com SMTP ativo enviou 26 mensagens para caixas que não existem. Todas viraram
+**hard bounce**, os endereços foram para a blocklist da Brevo, e o efeito na
+reputação de envio é acumulativo e não se desfaz.
 
-O primeiro remédio foi abortar: a suíte falhava com a instrução de subir a stack
-sem provedor. Funcionava, mas ensinava a coisa errada — um vermelho que não é
-defeito treina a ignorar vermelho.
+**Primeira resposta: abortar.** A suíte passou a falhar quando detectava provedor
+configurado, com a instrução de subir a stack sem ele. Impedia o dano, mas
+ensinava a coisa errada — um vermelho que não é defeito treina a ignorar vermelho.
 
-A solução foi pular, com três cuidados:
+**Segunda resposta: pular.** Os 47 testes que autenticam passaram a se pular,
+com aviso ruidoso, e no CI a regra se invertia para falhar. Melhor, e ainda
+errado: pular é cobertura que ninguém confere, e a suíte inteira ficava
+dependendo de detectar corretamente uma condição externa.
 
-**A detecção é real.** O `globalSetup` consulta o `/health` dos dois backends
-antes da coleta e lê `email_provider`, um rótulo (`brevo` / `none`) que os dois
-backends passaram a expor. Perguntar à stack em execução, e não à variável do
-shell que a invocou: o container pode ter subido com outro valor, e é o container
-que envia. E não se descobre enviando — isso seria autodestrutivo.
+**A resposta certa era mais simples, e estava no enunciado do problema.** Os
+endereços não precisam ser de um domínio real. A RFC 2606 reserva `.invalid`,
+`.test`, `.example` e `.localhost` para nunca existirem: não há MX, nada é
+entregue. A suíte passou a usar `@e2e.invalid`, e os dois backends passaram a
+recusar entrega em domínio reservado antes de chamar o provedor.
 
-**O skip é ruidoso.** Um bloco de aviso na saída diz em qual backend o provedor
-está ativo e qual comando roda a suíte completa. Teste pulado em silêncio é pior
-do que teste falhando: a suíte termina verde e ninguém sabe que 47 verificações
-não rodaram.
+Agora os 52 rodam sempre — com Brevo ligada ou não — e o dano é impossível, não
+evitado. Verificado: 52 passam com a conta real ativa, 16 supressões no log,
+zero tentativas de envio.
 
-**A guarda que abortava continua lá.** Ela cobre a suíte invocada sem o
-`globalSetup`. Skip é o caminho normal; abortar é a rede de segurança.
+O detalhe que faz isso ser arquitetura e não gambiarra de teste: **a regra é
+correta em produção também.** Enviar para um domínio reservado é garantir um
+bounce, e bounce cobra da entregabilidade de todo o resto que a conta manda. Um
+sistema que envia e-mail deveria recusar isso independentemente de ter uma suíte
+de testes. Que a suíte fique incapaz de causar dano é consequência.
 
-E o skip não vira buraco de cobertura, porque **no CI a regra se inverte**: lá,
-provedor ativo é erro. Pular é a resposta certa na máquina do desenvolvedor, onde
-o provedor está ligado de propósito; no pipeline, que é quem responde pela
-cobertura de autenticação, um job verde com 47 testes pulados afirmaria algo
-falso. Os 50 rodam sempre — imposto, não esperado.
+Fica coberto por três lados: unidade nos dois backends (incluindo a garantia de
+que a requisição HTTP não chega a sair), um teste de paridade que lê o arquivo C#
+e compara as listas, e dois testes ponta a ponta que pedem acesso e exigem
+`email_sent: false` — lendo `email_provider` do `/health`, para a mensagem de
+falha dizer se havia provedor ativo.
 
 ### Por que banco de verdade, e não provider em memória
 

@@ -333,7 +333,7 @@ Estas têm default no código e no compose. Só defina se precisar mudar:
 Use-as na linha de comando quando for pontual:
 
 ```bash
-AUTH_RATE_LIMIT=500 BREVO_API_KEY= docker compose up -d   # o que a suíte E2E faz
+AUTH_RATE_LIMIT=500 docker compose up -d   # o teto que a suíte E2E precisa
 ```
 
 **Sobre `PROCESSING_SIMULATED_WORK_MS`:** é este o tempo que o webhook **não
@@ -368,15 +368,15 @@ sintaxe `${VAR:?mensagem}` impede que um valor de desenvolvimento chegue lá.
 
 ## Testes
 
-**642 testes** no total.
+**683 testes** no total.
 
 ```bash
-# Backend .NET — 256 testes (unidade + integração com PostgreSQL real)
+# Backend .NET — 275 testes (unidade + integração com PostgreSQL real)
 cd backend-dotnet
 dotnet test Sabemi.slnx --settings coverlet.runsettings --results-directory TestResults
 python scripts/check-coverage.py TestResults --min 80
 
-# Frontend + BFF — 336 testes. Precisa do PostgreSQL no ar
+# Frontend + BFF — 356 testes. Precisa do PostgreSQL no ar
 cd frontend
 pnpm test              # sem cobertura
 pnpm test:coverage     # com o limiar aplicado
@@ -388,15 +388,15 @@ migrado automaticamente antes de rodar — isso mantém a suíte independente da
 stack de desenvolvimento, cujo worker consumiria a mesma fila.
 
 O limiar de 80 % é verificado nos dois lados e **o CI falha abaixo dele**.
-Cobertura atual: **83,8 %** no .NET, **89,2 %** de linhas no frontend.
+Cobertura atual: **84,0 %** no .NET, **89,1 %** de linhas no frontend.
 
-### Ponta a ponta — 50 testes contra a stack real
+### Ponta a ponta — 52 testes contra a stack real
 
 Atravessam a fiação de verdade: containers separados, rede do Docker, worker em
 outro processo. Rodam contra os **dois backends**.
 
 ```bash
-AUTH_RATE_LIMIT=500 BREVO_API_KEY= SMTP_HOST= docker compose up -d --wait
+AUTH_RATE_LIMIT=500 docker compose up -d --wait
 
 cd tests/e2e && pnpm install && pnpm test
 ```
@@ -404,12 +404,10 @@ cd tests/e2e && pnpm install && pnpm test
 O teto de login é elevado porque a suíte faz dezenas de autenticações do mesmo IP
 em segundos — em produção o limite é 10/min.
 
-`BREVO_API_KEY=` e `SMTP_HOST=` vazios porque a suíte autentica com endereços
-inventados: com provedor ativo, a stack enviaria de verdade e cada login viraria
-um hard bounce. Esquecer disso não custa mais nada — antes da coleta, a suíte
-consulta o `/health` dos dois backends e, achando provedor, **pula** os 47 testes
-que autenticam com um aviso na saída, em vez de falhar ou enviar. No CI, onde
-pular seria mentir sobre cobertura, provedor ativo **falha**. Detalhes em
+A suíte pode rodar com provedor de e-mail ligado sem disparar nada: os endereços
+saem em `@e2e.invalid`, e os dois backends recusam entrega em domínio reservado
+por RFC antes de chamar o provedor. Não é concessão aos testes — a mensagem não
+chegaria de qualquer forma, e cada tentativa seria um hard bounce. Detalhes em
 [`tests/e2e/README.md`](tests/e2e/README.md).
 
 Varredura rápida da stack:
@@ -421,8 +419,8 @@ bash scripts/smoke-test.sh
 ### Verificar o envio de e-mail
 
 Isto **não** está na suíte: envia um e-mail de verdade, depende de rede e de
-cota, e a suíte E2E se pula justamente quando há provedor ativo. É um verificador
-sob demanda:
+cota, e a suíte E2E usa endereços em domínio reservado justamente para nunca
+enviar. É um verificador sob demanda:
 
 ```bash
 node scripts/verificar-email.mjs voce@exemplo.com

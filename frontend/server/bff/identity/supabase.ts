@@ -1,4 +1,5 @@
 import { bffConfig } from "../config";
+import { podeReceber } from "../email-address";
 
 import type { ChallengeResult, IdentityProvider, OtpVerification } from "./types";
 
@@ -61,6 +62,20 @@ export const provedorSupabase: IdentityProvider = {
       magicUrl: null,
       otpCode: null,
     };
+
+    // Quem envia aqui é o GoTrue, por fora do nosso cliente de e-mail - então a
+    // supressão de domínio reservado precisa acontecer ANTES de delegar, ou a
+    // regra valeria só no modo local.
+    //
+    // O pedido fica criado e sem caminho de conclusão, que é o mesmo estado de um
+    // GoTrue indisponível (abaixo). É correto: um endereço que não pode receber
+    // e-mail não tem como completar um fluxo cujo único canal é o e-mail.
+    if (!podeReceber(email)) {
+      console.info(
+        `[bff-auth] desafio não delegado ao GoTrue para ${email}: domínio reservado por RFC.`,
+      );
+      return { ...semSegredos, emailEnviado: false };
+    }
 
     try {
       const url =

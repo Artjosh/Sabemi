@@ -61,6 +61,24 @@ afterEach(() => {
 });
 
 describe("envio pela Brevo", () => {
+  it("um domínio reservado não gera nem a CHAMADA", async () => {
+    // O ponto do teste é o espião não ter sido chamado: não basta a Brevo
+    // recusar depois, a requisição não pode sair. Uma tentativa de entrega em
+    // domínio reservado é um hard bounce garantido, e bounce corrói a
+    // entregabilidade de tudo o mais que a conta envia.
+    const espiao = stubFetch(respostaOk());
+    const { enviarEmailDeAcesso } = await comConfig(CONFIG_PADRAO);
+
+    const enviou = await enviarEmailDeAcesso(
+      "e2e-vinext-123@e2e.invalid",
+      "https://app/x",
+      "123456",
+    );
+
+    expect(enviou).toBe(false);
+    expect(espiao).not.toHaveBeenCalled();
+  });
+
   it("chama o endpoint transacional da v3", async () => {
     const espiao = stubFetch(respostaOk());
     const { enviarEmailDeAcesso } = await comConfig(CONFIG_PADRAO);

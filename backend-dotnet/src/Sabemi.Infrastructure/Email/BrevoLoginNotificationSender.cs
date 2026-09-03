@@ -1,3 +1,4 @@
+using Sabemi.Domain.Auth;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
@@ -46,6 +47,19 @@ public sealed class BrevoLoginNotificationSender(
         string otpCode,
         CancellationToken cancellationToken = default)
     {
+        // Dominio reservado por RFC nunca recebe: a mensagem viraria hard
+        // bounce, e bounce corroi a entregabilidade de todo o restante. Aqui, e
+        // nao no chamador, para valer para qualquer futuro remetente que use
+        // este cliente - e o log distingue "suprimido" de "falhou", que sao
+        // coisas diferentes para quem opera.
+        if (!EnderecoDeEmail.PodeReceber(email))
+        {
+            logger.LogInformation(
+                "Envio suprimido para {Email}: dominio reservado por RFC, nunca recebe e-mail.",
+                email);
+            return false;
+        }
+
         var conteudo = LoginEmail.Build(
             magicUrl, otpCode, (int)_auth.MagicLinkTtl.TotalMinutes);
 

@@ -8,7 +8,7 @@ fariam. Nada é substituído por duble.
 
 ```bash
 # Na raiz do repositório
-AUTH_RATE_LIMIT=500 BREVO_API_KEY= SMTP_HOST= docker compose up -d --wait
+AUTH_RATE_LIMIT=500 docker compose up -d --wait
 
 cd tests/e2e
 pnpm install
@@ -20,54 +20,43 @@ pnpm test
 > dezenas de autenticações do mesmo IP em segundos. Sem isso os testes recebem
 > `429` e falham por um limite que está funcionando corretamente.
 >
-> **Por que `BREVO_API_KEY=` e `SMTP_HOST=`.** A suíte autentica com endereços
-> inventados (`e2e-dotnet-1788405946722@sabemi.com.br`). Com um provedor de
-> e-mail configurado, a stack **envia de verdade** para eles — e cada um vira um
-> hard bounce na conta, que é exatamente o que corrói reputação de envio.
->
-> Aconteceu neste projeto: uma execução no modo `supabase` com SMTP ativo gerou
-> 26 bounces antes de alguém perceber. Os endereços foram para a blocklist da
-> Brevo, que é o comportamento certo dela — mas o estrago é acumulativo e não se
-> desfaz.
+### Nenhum login desta suíte gera e-mail
 
-### Com provedor ativo, os testes de login se pulam
+A suíte autentica dezenas de vezes por execução, com endereços inventados. Ela
+pode rodar contra uma stack com provedor de e-mail ligado sem disparar uma única
+mensagem, e isso não depende de ninguém lembrar de um comando.
 
-Rodar a suíte contra uma stack que tem provedor não falha nem envia nada: os 47
-testes que autenticam são **pulados**, e os 3 que não dependem de login rodam.
+Os endereços saem de `emailDeTeste` ([support.ts](support.ts)), em
+**`@e2e.invalid`**. A RFC 2606 reserva `.invalid` — junto de `.test`, `.example` e
+`.localhost` — para nunca existir: não há MX, nada é entregue. Os dois backends
+recusam entrega nesses domínios **antes** de chamar o provedor
+([`EnderecoDeEmail.cs`](../../backend-dotnet/src/Sabemi.Domain/Auth/EnderecoDeEmail.cs)
+e [`email-address.ts`](../../frontend/server/bff/email-address.ts)).
 
-Quem decide é o [`global-setup.ts`](global-setup.ts), antes da coleta. Ele
-consulta o `/health` dos dois backends e lê o campo `email_provider` — um rótulo
-(`brevo` / `none`), sem chave nem remetente. A detecção é **real**: pergunta à
-stack em execução, não à variável de ambiente do shell que a invocou, que pode
-divergir do que o container recebeu. E não descobre enviando, o que seria
-autodestrutivo.
+Isso não é uma afordância de teste. Recusar entrega em domínio reservado é a
+decisão certa em produção também: a mensagem não chegaria de qualquer forma, e a
+tentativa cobra um preço — cada uma é um **hard bounce**, e bounce não é mensagem
+perdida, é reputação de envio perdida, de forma acumulativa e irreversível. Que a
+suíte fique incapaz de causar dano é consequência, não motivação.
 
-O resultado vira `E2E_EMAIL_PROVIDER_ATIVO` (`0` / `1`), lido em
-[`support.ts`](support.ts) como `EMAIL_PROVIDER_ATIVO`. Os arquivos de teste não
-o consultam direto: usam `descreveComLogin`, um `describe` que se pula quando há
-provedor. Assim a dependência de sessão fica declarada no lugar onde ela existe —
-o bloco — e não repetida como condição em onze pontos, que é onde se esquece um.
+**Como se chegou aqui.** Os endereços eram inventados em `@sabemi.com.br`, um
+domínio real. Uma execução com SMTP ativo gerou 26 hard bounces. O primeiro
+remédio foi a suíte abortar quando havia provedor; o segundo foi pular os testes
+de login. Os dois contornavam o problema — o segundo deixava 47 testes sem rodar,
+e teste pulado é cobertura que ninguém confere. Trocar o domínio resolve na raiz:
+não há envio a evitar, então não há nada a pular nem abortar.
 
-O skip é **ruidoso de propósito** — um bloco de aviso na saída, dizendo em qual
-backend o provedor está ativo e qual comando roda a suíte completa. Teste pulado
-em silêncio é pior do que teste falhando: a suíte termina verde e ninguém sabe
-que 47 verificações não rodaram.
+**Duas defesas contra regressão silenciosa**, porque o sintoma de errar aqui não
+aparece na saída do teste — aparece na reputação da conta, semanas depois:
 
-Três coisas que este desenho preserva:
+- Dois testes ponta a ponta (um por backend) pedem acesso e exigem
+  `email_sent: false`. Eles leem `email_provider` do `/health` para a mensagem de
+  falha dizer se havia provedor ativo — com provedor, provam a supressão; sem, a
+  ausência.
+- `sessaoAutenticada` aborta se algum login retornar `email_sent: true`. É uma
+  condição que nunca dispara, e é barata: um bounce não se desfaz.
 
-- **A stack fora do ar continua sendo erro**, não motivo para pular. Sem ela
-  nada aqui faz sentido, e a mensagem traz o comando que resolve.
-- **A guarda dentro de `sessaoAutenticada` permanece.** Se a suíte for
-  invocada sem o `globalSetup` — um arquivo isolado, outro runner —, o primeiro
-  login que veja `email_sent: true` aborta. O skip é o caminho normal; a guarda
-  é a rede.
-- **Nada de autenticação deixa de ser coberto.** Pular é a resposta certa para
-  a máquina do desenvolvedor, onde o provedor está ligado de propósito. No CI é
-  a resposta errada: lá a suíte responde pela cobertura de autenticação, e um job
-  verde com 47 testes pulados afirmaria algo falso. Então, com `CI` no ambiente,
-  provedor ativo **falha** em vez de pular — a regra é imposta, não esperada.
-
-Para exercitar o envio de e-mail, que estes testes deliberadamente **não** fazem:
+Para exercitar o envio de verdade, que esta suíte deliberadamente **não** faz:
 
 ```bash
 node scripts/verificar-email.mjs voce@exemplo.com

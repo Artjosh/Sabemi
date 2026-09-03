@@ -82,6 +82,22 @@ public class BrevoLoginNotificationSenderTests
     // ------------------------------------------------------- caminho felizardo
 
     [Fact]
+    public async Task Um_dominio_reservado_nao_gera_nem_a_CHAMADA()
+    {
+        // O ponto do teste e o `handler.Recebido` ficar nulo: nao basta a Brevo
+        // recusar depois, a requisicao nao pode sair. Uma tentativa de entrega
+        // em dominio reservado e um hard bounce garantido, e bounce corroi a
+        // entregabilidade de tudo o mais que a conta envia.
+        var (remetente, handler) = Montar();
+
+        var enviou = await remetente.SendAsync(
+            "e2e-dotnet-123@e2e.invalid", "https://app/confirm?token=t", "123456");
+
+        enviou.ShouldBeFalse();
+        handler.Recebido.ShouldBeNull();
+    }
+
+    [Fact]
     public async Task Envia_para_o_endpoint_transacional_da_v3()
     {
         var (remetente, handler) = Montar();

@@ -5,8 +5,9 @@ import {
   WEB_URL,
   Cliente,
   aguardarAte,
-  descreveComLogin,
+  emailDeTeste,
   navegador,
+  parceiro,
 } from "./support";
 
 /**
@@ -47,10 +48,10 @@ function consultar(desktop: Cliente, selector: string) {
   }>("/api/auth/login?step=poll", { selector });
 }
 
-descreveComLogin("autenticação cross-device por polling", () => {
+describe("autenticação cross-device por polling", () => {
   it("o desktop entra sozinho depois que o celular abre o link", async () => {
     const desktop = navegador();
-    const email = `cross-${Date.now()}@sabemi.com.br`;
+    const email = emailDeTeste("cross");
 
     // ---- Passo 1: o desktop pede o acesso.
     const pedido = await pedirAcesso(desktop, email);
@@ -97,7 +98,7 @@ descreveComLogin("autenticação cross-device por polling", () => {
   it("o pedido é de uso único: o polling seguinte encerra com 404", async () => {
     // É assim que o cliente sabe parar, em vez de girar até o prazo de 15 min.
     const desktop = navegador();
-    const pedido = await pedirAcesso(desktop, `unico-${Date.now()}@sabemi.com.br`);
+    const pedido = await pedirAcesso(desktop, emailDeTeste("unico"));
 
     await new Cliente("").get(pedido.dev_magic_url);
 
@@ -110,7 +111,7 @@ descreveComLogin("autenticação cross-device por polling", () => {
 
   it("o código OTP autentica na própria aba, sem abrir o link", async () => {
     const desktop = navegador();
-    const email = `otp-${Date.now()}@sabemi.com.br`;
+    const email = emailDeTeste("otp");
     const pedido = await pedirAcesso(desktop, email);
 
     const resposta = await desktop.post<{ authenticated: boolean; user?: { email: string } }>(
@@ -129,7 +130,7 @@ descreveComLogin("autenticação cross-device por polling", () => {
 
   it("o código incorreto não autentica e não grava cookie", async () => {
     const desktop = navegador();
-    const pedido = await pedirAcesso(desktop, `errado-${Date.now()}@sabemi.com.br`);
+    const pedido = await pedirAcesso(desktop, emailDeTeste("errado"));
 
     const resposta = await desktop.post("/api/auth/login?step=otp", {
       selector: pedido.selector,
@@ -142,7 +143,7 @@ descreveComLogin("autenticação cross-device por polling", () => {
 
   it("a sessão sobrevive a um F5 e o logout a encerra", async () => {
     const desktop = navegador();
-    const email = `sessao-${Date.now()}@sabemi.com.br`;
+    const email = emailDeTeste("sessao");
     const pedido = await pedirAcesso(desktop, email);
 
     await new Cliente("").get(pedido.dev_magic_url);
@@ -180,7 +181,7 @@ descreveComLogin("autenticação cross-device por polling", () => {
  * demonstracao mais direta de que a feature foi reproduzida nos dois, e nao
  * apenas no primario.
  */
-descreveComLogin.each(BACKENDS)("autenticação no backend $nome", (backend) => {
+describe.each(BACKENDS)("autenticação no backend $nome", (backend) => {
   it("completa o login cross-device", async () => {
     const desktop = navegador();
 
@@ -190,7 +191,7 @@ descreveComLogin.each(BACKENDS)("autenticação no backend $nome", (backend) => 
     });
     expect(troca.body.active).toBe(backend.id);
 
-    const email = `${backend.id}-${Date.now()}@sabemi.com.br`;
+    const email = emailDeTeste(backend.id);
     const pedido = await pedirAcesso(desktop, email);
 
     // O link aponta para o backend selecionado.
@@ -213,12 +214,12 @@ descreveComLogin.each(BACKENDS)("autenticação no backend $nome", (backend) => 
   });
 });
 
-descreveComLogin("o token de sessão nunca alcança o navegador", () => {
+describe("o token de sessão nunca alcança o navegador", () => {
   it("nenhuma resposta do fluxo de login contém o JWT", async () => {
     // A propriedade central do padrão BFF adotado. Se o token aparecesse em
     // qualquer corpo, um XSS no painel poderia lê-lo com response.json().
     const desktop = navegador();
-    const email = `xss-${Date.now()}@sabemi.com.br`;
+    const email = emailDeTeste("xss");
 
     const corpos: string[] = [];
 
@@ -247,5 +248,42 @@ descreveComLogin("o token de sessão nunca alcança o navegador", () => {
 
     // E o token existe de fato - está no cookie, fora do alcance do JavaScript.
     expect(desktop.jar.valor("sabemi_session")).toMatch(/^eyJ/);
+  });
+});
+
+describe.each(BACKENDS)("nenhum login desta suíte gera e-mail — $nome", (backend) => {
+  it("o pedido de acesso não dispara envio, mesmo com provedor ativo", async () => {
+    // A garantia que substituiu o skip. A versão anterior desta suíte PULAVA os
+    // testes de login quando a stack tinha provedor de e-mail, porque autenticar
+    // com endereços inventados em domínio real gerava hard bounce - 26 deles, em
+    // um incidente. Pular evitava o dano e deixava 47 testes sem rodar.
+    //
+    // Agora o dano é impossível: os endereços saem em `@e2e.invalid`, e os dois
+    // backends recusam entrega em domínio reservado por RFC antes de chamar o
+    // provedor. Este teste é o que impede a garantia de regredir em silêncio.
+    //
+    // Ele é mais forte quando há provedor configurado - aí prova a supressão de
+    // verdade, e não apenas a ausência de provedor. Por isso lê o `/health`: para
+    // a mensagem de falha dizer qual dos dois casos estava valendo.
+    const saude = await parceiro(backend.base).get<{ email_provider?: string }>(
+      `${backend.prefixo}/health`,
+    );
+    const provedor = saude.body.email_provider ?? "desconhecido";
+
+    const cliente = navegador();
+    await cliente.post("/api/backend", { backend: backend.id });
+
+    const inicio = await cliente.post<{ email_sent: boolean }>(
+      "/api/auth/login?step=start",
+      { email: emailDeTeste("sem-envio") },
+    );
+
+    expect(inicio.status).toBe(200);
+    expect(
+      inicio.body.email_sent,
+      `email_sent veio true com email_provider="${provedor}". Um endereço em ` +
+        "domínio reservado por RFC nunca deve gerar tentativa de entrega: cada " +
+        "uma vira hard bounce e corrói a reputação de envio da conta.",
+    ).toBe(false);
   });
 });

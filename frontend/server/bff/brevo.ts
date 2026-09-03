@@ -1,4 +1,5 @@
 import { bffConfig } from "./config";
+import { podeReceber } from "./email-address";
 import { montarEmailDeAcesso } from "./login-email";
 
 /**
@@ -43,6 +44,17 @@ export async function enviarEmailDeAcesso(
   if (!apiKey) {
     // Nem deveria chegar aqui - quem chama verifica antes -, mas uma chave vazia
     // enviada à Brevo devolve 401 e polui o log com um erro que não é erro.
+    return false;
+  }
+
+  // Domínio reservado por RFC nunca recebe: a mensagem viraria hard bounce, e
+  // bounce corrói a entregabilidade de todo o restante. Aqui, e não no chamador,
+  // para valer para qualquer futuro remetente que use este cliente - e o log
+  // distingue "suprimido" de "falhou", que são coisas diferentes para quem opera.
+  if (!podeReceber(email)) {
+    console.info(
+      `[bff-brevo] envio suprimido para ${email}: domínio reservado por RFC, nunca recebe e-mail.`,
+    );
     return false;
   }
 

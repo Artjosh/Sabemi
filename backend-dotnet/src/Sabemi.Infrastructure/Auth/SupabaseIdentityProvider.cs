@@ -1,3 +1,4 @@
+using Sabemi.Domain.Auth;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
@@ -53,6 +54,23 @@ public sealed class SupabaseIdentityProvider(
     {
         var pedido = LoginRequest.CreateDelegado(
             email, selector, clock.UtcNow, _auth.MagicLinkTtl);
+
+        // Quem envia aqui e o GoTrue, por fora do nosso cliente de e-mail -
+        // entao a supressao de dominio reservado precisa acontecer ANTES de
+        // delegar, ou a regra valeria so no modo local.
+        //
+        // O pedido fica criado e sem caminho de conclusao, que e o mesmo estado
+        // de um GoTrue indisponivel (abaixo). E correto: um endereco que nao
+        // pode receber e-mail nao tem como completar um fluxo cujo unico canal e
+        // o e-mail.
+        if (!EnderecoDeEmail.PodeReceber(email))
+        {
+            logger.LogInformation(
+                "Desafio nao delegado ao GoTrue para {Email}: dominio reservado por RFC.",
+                email);
+
+            return new ChallengeResult(pedido, EmailEnviado: false, MagicUrl: null, OtpCode: null);
+        }
 
         // O selector viaja no `redirect_to`: é o que liga o clique no celular ao
         // pedido que está sendo pollado no desktop.

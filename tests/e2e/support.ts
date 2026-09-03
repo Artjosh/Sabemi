@@ -16,31 +16,27 @@
  * permite exercitar a sessao em cookie httpOnly de ponta a ponta.
  */
 
-import { describe } from "vitest";
-
 /**
- * Ha provedor de e-mail ativo na stack?
+ * Endereco de teste, em dominio que NUNCA recebe e-mail.
  *
- * Preenchida pelo `global-setup.ts`, que consulta o `/health` dos dois backends
- * antes da coleta. Quem consome e o `descreveComLogin` abaixo, para PULAR os
- * blocos que autenticam: eles usam enderecos inventados, e com provedor ativo
- * cada login vira um hard bounce na conta.
+ * <b>Por que `.invalid`.</b> A RFC 2606 reserva `.invalid` (e `.test`,
+ * `.example`, `.localhost`) para nunca existirem: nao ha MX, nada e entregue.
+ * Os dois backends recusam entrega nesses dominios antes de chamar o provedor -
+ * ver `EnderecoDeEmail.cs` e `server/bff/email-address.ts` -, entao esta suite
+ * pode autenticar dezenas de vezes contra uma stack de provedor ligado sem
+ * gerar uma unica tentativa de envio.
  *
- * Ausente = a suite foi rodada sem o globalSetup (um arquivo isolado, por
- * exemplo). Nesse caso vale `false`, que e o comportamento anterior: os testes
- * rodam. A guarda em `sessaoAutenticada` continua sendo a rede de seguranca.
+ * <b>Por que nao `@sabemi.com.br`.</b> Era o que se usava, e foi o erro: os
+ * enderecos sao inventados, mas o dominio e real, e uma execucao com provedor
+ * ativo gerou 26 hard bounces. Bounce nao e mensagem perdida - e reputacao de
+ * envio perdida, de forma acumulativa e irreversivel.
+ *
+ * O dominio esta declarado UMA vez, aqui. Espalhado pelos arquivos de teste, o
+ * proximo endereco novo teria a chance de nascer em dominio real.
  */
-export const EMAIL_PROVIDER_ATIVO = process.env.E2E_EMAIL_PROVIDER_ATIVO === "1";
-
-/**
- * `describe` para blocos que precisam de uma sessao autenticada.
- *
- * Identico a `describe`, exceto que se pula quando ha provedor de e-mail ativo.
- * Existe para o arquivo de teste declarar a dependencia UMA vez, em vez de
- * repetir `describe.skipIf(EMAIL_PROVIDER_ATIVO)` em cada bloco - onze deles
- * hoje, e a repeticao e onde se esquece um.
- */
-export const descreveComLogin = describe.skipIf(EMAIL_PROVIDER_ATIVO);
+export function emailDeTeste(prefixo: string): string {
+  return `${prefixo}-${Date.now()}-${Math.floor(Math.random() * 100000)}@e2e.invalid`;
+}
 
 export const API_URL = process.env.E2E_API_URL ?? "http://localhost:8080";
 export const WEB_URL = process.env.E2E_WEB_URL ?? "http://localhost:3000";
@@ -273,7 +269,7 @@ export async function sessaoAutenticada(
     dev_magic_url: string;
     email_sent: boolean;
   }>("/api/auth/login?step=start", {
-    email: `e2e-${backendId}-${Date.now()}@sabemi.com.br`,
+    email: emailDeTeste(`e2e-${backendId}`),
   });
 
   if (inicio.status !== 200) {
@@ -283,18 +279,22 @@ export async function sessaoAutenticada(
     );
   }
 
-  // A suite autentica com enderecos INVENTADOS. Se a stack tiver um provedor de
-  // e-mail configurado, ela envia para eles de verdade - e cada um vira um hard
-  // bounce, que e exatamente o que corroi reputacao de envio.
+  // Isto NAO deveria ser alcancavel: `emailDeTeste` usa `@e2e.invalid`, e os
+  // dois backends recusam entrega em dominio reservado antes de chamar o
+  // provedor.
   //
-  // Aconteceu neste projeto: uma execucao com SMTP ativo gerou 26 bounces antes
-  // de alguem perceber. Documentar nao impede; abortar impede.
+  // Continua aqui porque o custo de errar e assimetrico. Se alguem trocar o
+  // dominio por um real, ou a supressao regredir, o sintoma seria SILENCIOSO:
+  // dezenas de hard bounces por execucao, corroendo a reputacao de envio da
+  // conta sem nada aparecer na saida do teste. Uma condicao que nunca dispara e
+  // barata; um bounce nao se desfaz.
   if (inicio.body.email_sent) {
     throw new Error(
-      "A stack esta com um provedor de e-mail ATIVO, e esta suite autentica com " +
-        "enderecos inventados - cada login vira um hard bounce na conta.\n\n" +
-        "Suba a stack de teste sem provedor:\n" +
-        "  AUTH_RATE_LIMIT=500 BREVO_API_KEY= SMTP_HOST= docker compose up -d --wait",
+      "Um login desta suite DISPAROU e-mail de verdade - cada um vira um hard " +
+        "bounce na conta.\n\n" +
+        "Verifique se os enderecos ainda saem de `emailDeTeste` (support.ts), " +
+        "em `@e2e.invalid`, e se a regra de dominio reservado continua valendo " +
+        "(EnderecoDeEmail.cs e server/bff/email-address.ts).",
     );
   }
 

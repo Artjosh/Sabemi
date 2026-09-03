@@ -8,7 +8,7 @@ import {
   Cliente,
   aguardarAte,
   comBackend,
-  descreveComLogin,
+  emailDeTeste,
   navegador,
   pagamento,
   parceiro,
@@ -65,7 +65,7 @@ function entregarEm<T = Ack>(backendId: "dotnet" | "vinext", corpo: unknown) {
 async function autenticar(cliente: Cliente, rotulo: string) {
   const inicio = await cliente.post<{ selector: string; dev_magic_url: string }>(
     "/api/auth/login?step=start",
-    { email: `${rotulo}-${Date.now()}@sabemi.com.br` },
+    { email: emailDeTeste(rotulo) },
   );
 
   await new Cliente("").get(inicio.body.dev_magic_url);
@@ -112,7 +112,7 @@ describe("seleção de backend", () => {
   });
 });
 
-descreveComLogin("a troca muda quem responde", () => {
+describe("a troca muda quem responde", () => {
   it("o gateway despacha para a implementação selecionada", async () => {
     const cliente = navegador();
 
@@ -188,7 +188,7 @@ descreveComLogin("a troca muda quem responde", () => {
   });
 });
 
-descreveComLogin("a troca muda os DADOS, não só a rota", () => {
+describe("a troca muda os DADOS, não só a rota", () => {
   it("um evento entregue a um backend é visível pelo OUTRO", async () => {
     // A propriedade que o schema compartilhado entrega: a troca muda a
     // IMPLEMENTAÇÃO, e não os dados.
@@ -249,7 +249,7 @@ descreveComLogin("a troca muda os DADOS, não só a rota", () => {
   });
 });
 
-descreveComLogin("os dois backends cumprem o mesmo contrato", () => {
+describe("os dois backends cumprem o mesmo contrato", () => {
   it("respondem /health com a mesma forma", async () => {
     const cliente = navegador();
 
@@ -339,7 +339,7 @@ descreveComLogin("os dois backends cumprem o mesmo contrato", () => {
   });
 });
 
-descreveComLogin("ORM e persistência em ambos os backends", () => {
+describe("ORM e persistência em ambos os backends", () => {
   it.each([
     { id: "dotnet" as const, orm: "EF Core" },
     { id: "vinext" as const, orm: "Prisma" },
@@ -381,7 +381,7 @@ descreveComLogin("ORM e persistência em ambos os backends", () => {
   });
 });
 
-descreveComLogin("reenfileiramento manual", () => {
+describe("reenfileiramento manual", () => {
   // O botao do painel chama este endpoint. Aqui ele e exercitado pelo gateway,
   // nos DOIS backends, com os mesmos casos - porque o painel e um so e o
   // operador nao pode receber respostas diferentes conforme o backend ativo.
@@ -452,7 +452,7 @@ descreveComLogin("reenfileiramento manual", () => {
   });
 });
 
-descreveComLogin("diagnóstico de falha no contrato da API", () => {
+describe("diagnóstico de falha no contrato da API", () => {
   it.each(BACKENDS)("$nome explica um payload inválido em português", async ({ id }) => {
     // O tooltip do painel é montado com estes campos. Se o backend não os
     // devolvesse, o operador voltaria a ver só a mensagem crua da validação.
