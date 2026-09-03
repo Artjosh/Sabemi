@@ -411,6 +411,20 @@ Varredura rápida da stack:
 bash scripts/smoke-test.sh
 ```
 
+### Verificar o envio de e-mail
+
+Isto **não** está na suíte: envia um e-mail de verdade, depende de rede e de
+cota, e a suíte E2E aborta justamente quando há provedor ativo. É um verificador
+sob demanda:
+
+```bash
+node scripts/verificar-email.mjs voce@exemplo.com
+```
+
+Ele separa as quatro causas de falha que a Brevo não deixa óbvias — chave errada,
+IP não autorizado, remetente não verificado, destinatário na blocklist — e diz o
+que fazer em cada uma.
+
 ---
 
 ## Deploy

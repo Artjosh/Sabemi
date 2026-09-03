@@ -85,12 +85,32 @@ function descobrirUrl() {
 
   const arquivo = join(RAIZ, ".env");
   if (existsSync(arquivo)) {
-    for (const linha of readFileSync(arquivo, "utf8").split("\n")) {
-      const m = /^\s*DATABASE_URL\s*=\s*(.*)$/.exec(linha);
-      if (m) {
-        const valor = m[1].trim().replace(/^["']|["']$/g, "");
-        if (valor) return { url: valor, origem: ".env" };
-      }
+    // Parsing explícito, sem expressão regular.
+    //
+    // A versão anterior usava `/^\s*DATABASE_URL\s*=\s*(.*)$/` e NUNCA leu o
+    // `.env` no Windows. A causa é sutil: o arquivo tem CRLF, e em JavaScript
+    // o `.` não casa `\r` (assim como não casa `\n`). Depois do `split("\n")`
+    // sobra um `\r` no fim da linha que `(.*)` não consome e `$` não alcança -
+    // então a regex simplesmente não casava.
+    //
+    // O sintoma era silencioso e enganoso: a variável estava no arquivo, o
+    // script caía no default e anunciava `origem: padrão de desenvolvimento`.
+    // Quem apontasse o `.env` para um Supabase remoto migraria o banco LOCAL
+    // achando que tinha migrado o remoto.
+    for (const bruta of readFileSync(arquivo, "utf8").split("\n")) {
+      const linha = bruta.trim();
+      if (!linha || linha.startsWith("#")) continue;
+
+      const igual = linha.indexOf("=");
+      if (igual === -1) continue;
+      if (linha.slice(0, igual).trim() !== "DATABASE_URL") continue;
+
+      const valor = linha
+        .slice(igual + 1)
+        .trim()
+        .replace(/^["']|["']$/g, "");
+
+      if (valor) return { url: valor, origem: ".env" };
     }
   }
 
