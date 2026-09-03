@@ -6,9 +6,11 @@
   "description": "Testes ponta a ponta contra a stack em execucao (docker compose up).",
   "scripts": {
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@types/node": "^24.13.3",
     "typescript": "^5.9.3",
     "vitest": "^4.1.11"
   }

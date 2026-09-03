@@ -41,12 +41,19 @@ interface EventoDto {
   status_processamento: string;
 }
 
-/** Entrega um pagamento direto no backend indicado (sem passar pelo gateway). */
-function entregarEm(backendId: "dotnet" | "vinext", corpo: unknown) {
+/**
+ * Entrega um pagamento direto no backend indicado (sem passar pelo gateway).
+ *
+ * Genérico porque o MESMO endpoint devolve corpos diferentes conforme o
+ * desfecho: `Ack` em 202 e 200, e `ProblemDetails` em 400. Fixar o tipo em `Ack`
+ * obrigava quem testa a validação a converter com `as`, e o TypeScript recusava
+ * a conversão - com razão, porque os dois tipos não se sobrepõem.
+ */
+function entregarEm<T = Ack>(backendId: "dotnet" | "vinext", corpo: unknown) {
   const base = backendId === "dotnet" ? API_URL : WEB_URL;
   const caminho = backendId === "dotnet" ? "/webhooks/pagamento" : "/api/bff/webhooks/pagamento";
 
-  return parceiro(base).request<Ack>(caminho, {
+  return parceiro(base).request<T>(caminho, {
     method: "POST",
     json: corpo,
     headers: { "X-Api-Key": API_KEY },
@@ -62,10 +69,10 @@ async function autenticar(cliente: Cliente, rotulo: string) {
 
   await new Cliente("").get(inicio.body.dev_magic_url);
 
-  const aprovado = await cliente.post<{ status: string; user?: { id: string } }>(
-    "/api/auth/login?step=poll",
-    { selector: inicio.body.selector },
-  );
+  const aprovado = await cliente.post<{
+    status: string;
+    user?: { id: string; email: string };
+  }>("/api/auth/login?step=poll", { selector: inicio.body.selector });
 
   expect(aprovado.body.status).toBe("approved");
   return aprovado.body.user!;
@@ -282,14 +289,19 @@ describe("os dois backends cumprem o mesmo contrato", () => {
     // qual backend o recebeu.
     const invalido = pagamento({ id_contrato: "", valor: -1, status: "XPTO" });
 
-    const doDotnet = await entregarEm("dotnet", { ...invalido });
-    const doVinext = await entregarEm("vinext", { ...invalido, id_transacao: `${invalido.id_transacao}-B` });
+    type Recusa = { code: string; errors: Record<string, string[]> };
+
+    const doDotnet = await entregarEm<Recusa>("dotnet", { ...invalido });
+    const doVinext = await entregarEm<Recusa>("vinext", {
+      ...invalido,
+      id_transacao: `${invalido.id_transacao}-B`,
+    });
 
     expect(doDotnet.status).toBe(400);
     expect(doVinext.status).toBe(400);
 
-    const a = doDotnet.body as { code: string; errors: Record<string, string[]> };
-    const b = doVinext.body as { code: string; errors: Record<string, string[]> };
+    const a = doDotnet.body;
+    const b = doVinext.body;
 
     expect(a.code).toBe("validation_failed");
     expect(b.code).toBe("validation_failed");
