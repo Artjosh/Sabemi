@@ -388,7 +388,7 @@ migrado automaticamente antes de rodar — isso mantém a suíte independente da
 stack de desenvolvimento, cujo worker consumiria a mesma fila.
 
 O limiar de 80 % é verificado nos dois lados e **o CI falha abaixo dele**.
-Cobertura atual: **83,6 %** no .NET, **89,2 %** de linhas no frontend.
+Cobertura atual: **83,8 %** no .NET, **89,2 %** de linhas no frontend.
 
 ### Ponta a ponta — 50 testes contra a stack real
 
@@ -478,6 +478,7 @@ backend-dotnet/               Backend primário — ASP.NET Core, EF Core, worke
 frontend/                     Interface VINEXT + backend alternativo (BFF, Prisma)
 supabase/                     Init do banco e chaves da plataforma local
 scripts/migrar.mjs            Migrations (local ou remoto) + verificação do Prisma
+scripts/verificar-email.mjs   Diagnóstico do envio de e-mail, sob demanda
 scripts/smoke-test.sh         Verificação da stack em execução
 tests/e2e/                    Ponta a ponta contra a stack em containers
 docs/APRESENTACAO.md          Arquitetura e decisões técnicas

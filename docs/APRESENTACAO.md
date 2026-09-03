@@ -851,7 +851,7 @@ publicados, e rodam com **usuário sem privilégios**.
 
 ## 16. Testes
 
-**641 testes.** Cobertura de **83,6 %** no backend .NET e **89,2 %** de linhas no
+**641 testes.** Cobertura de **83,8 %** no backend .NET e **89,2 %** de linhas no
 frontend — ambos acima do mínimo de 80 % exigido, verificado no pipeline.
 
 | Suíte                  | Testes  | Ambiente                                    |
@@ -1010,10 +1010,26 @@ vai para o log do servidor e, em desenvolvimento, para a tela. A escolha é
 deliberada: exigir credenciais para rodar `docker compose up` seria um obstáculo
 sem propósito na avaliação.
 
-A Brevo tem duas chaves: a de **SMTP** (`xsmtpsib-`), usada pelo GoTrue, foi
-configurada e o envio verificado de ponta a ponta. A da **API v3** (`xkeysib-`),
-usada pelos dois backends no modo local, ainda não — essa integração foi
-verificada contra um servidor HTTP falso, não contra a Brevo.
+**As duas integrações foram verificadas contra a Brevo real**, com entrega
+confirmada: a de SMTP (`xsmtpsib-`), que o GoTrue usa, e a da API v3
+(`xkeysib-`), que os dois backends usam. São chaves diferentes e não se
+substituem — a de SMTP devolve `Key not found` na API.
+
+O que essa verificação ensinou, e que nenhum teste com servidor falso teria
+mostrado: a conta pode ter **allowlist de IP**, e o IP que importa é o de saída
+do *container*, que difere do que o navegador mostra. E o remetente precisa estar
+verificado na conta, senão a recusa é `400` com uma mensagem que não diz isso.
+
+O caminho de erro também foi exercitado com a Brevo recusando de verdade: o login
+devolveu `200` com `email_sent: false` e o link na resposta, e o log trouxe a
+mensagem inteira dela — incluindo o endereço a autorizar. É o motivo de registrar
+o *corpo* da resposta e não só o status; um log de "HTTP 401" mandaria alguém
+procurar a chave errada.
+
+`scripts/verificar-email.mjs` empacota esse diagnóstico: separa as quatro causas
+(chave, IP, remetente, blocklist) e diz o que fazer em cada uma. Ele **não** está
+na suíte — envia de verdade, depende de terceiro, e a suíte E2E aborta justamente
+quando há provedor ativo.
 
 **Modo Supabase sem SMTP.** Com `AUTH_PROVIDER=supabase` e sem SMTP configurado,
 o link de acesso fica no log do *container do GoTrue*, e não na resposta — ele é
