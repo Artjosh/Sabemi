@@ -1,4 +1,17 @@
 {
+  // Configuração isolada: este diretório é um pacote próprio, com o próprio
+  // `package.json`. Ele não compartilha `node_modules` com o frontend nem com a
+  // raiz — não há `pnpm-workspace.yaml` aqui.
+  //
+  // Consequência prática: `@types/node` precisa estar nas devDependencies DESTE
+  // pacote. Enquanto não estava, o TypeScript falhava no carregamento da
+  // biblioteca de tipos ("Cannot find type definition file for 'node'") e parava
+  // ali — deixando o resto dos arquivos sem verificação alguma. Três erros de
+  // tipo reais sobreviveram assim.
+  //
+  // Se o erro reaparecer no editor depois de um `pnpm install`, é estado velho
+  // do servidor de tipos: reinicie-o (no VS Code, "TypeScript: Restart TS
+  // Server"). Na linha de comando, `pnpm typecheck` é a fonte de verdade.
   "compilerOptions": {
     "target": "ES2023",
     "lib": ["ES2023", "DOM"],
@@ -8,6 +21,9 @@
     "noEmit": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
+
+    // `vitest/globals` para `describe`/`it`/`expect` sem importar; `node` para
+    // `process`, `crypto` e o `fetch` do runtime.
     "types": ["vitest/globals", "node"]
   },
   "include": ["**/*.ts"]
