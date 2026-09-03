@@ -303,6 +303,17 @@ jobs:
           # dezenas de autenticacoes do mesmo IP em segundos, e o limite real
           # (10/min) a derrubaria por estar funcionando corretamente.
           AUTH_RATE_LIMIT: "500"
+          # Sem provedor de e-mail, explicitamente. A suite autentica com
+          # enderecos inventados; com provedor ativo a stack enviaria de verdade
+          # e cada login viraria um hard bounce.
+          #
+          # Estavam vazios por omissao - o runner nao tem `.env` e o compose usa
+          # `${BREVO_API_KEY:-}`. Explicito porque a omissao e fragil: bastaria
+          # alguem expor um secret com este nome ao job. O `global-setup.ts`
+          # FALHA se achar provedor com `CI` no ambiente, entao a regressao
+          # apareceria - mas o certo e nao depender da guarda.
+          BREVO_API_KEY: ""
+          SMTP_HOST: ""
         run: docker compose up -d --wait --wait-timeout 240
 
       # Verificacao rapida: se algo obvio estiver quebrado, falha aqui em

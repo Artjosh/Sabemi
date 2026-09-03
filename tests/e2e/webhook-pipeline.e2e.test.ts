@@ -5,6 +5,7 @@ import {
   BACKENDS,
   aguardarAte,
   comBackend,
+  descreveComLogin,
   pagamento,
   parceiro,
 } from "./support";
@@ -56,7 +57,7 @@ interface ContratoDto {
  */
 const comSessao = comBackend;
 
-describe.each(BACKENDS)("pipeline do webhook — backend $nome", (backend) => {
+descreveComLogin.each(BACKENDS)("pipeline do webhook — backend $nome", (backend) => {
   const banco = parceiro(backend.base);
 
   const entregar = (corpo: unknown, apiKey: string | null = API_KEY) =>
@@ -229,7 +230,7 @@ describe.each(BACKENDS)("pipeline do webhook — backend $nome", (backend) => {
   });
 });
 
-describe("filtros do dashboard sobre dados reais", () => {
+descreveComLogin("filtros do dashboard sobre dados reais", () => {
   it("filtra por status e por contrato, e os dois combinados", async () => {
     const sessao = await comSessao("dotnet");
     const banco = parceiro();

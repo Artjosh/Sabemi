@@ -4,10 +4,11 @@ import {
   API_KEY,
   API_URL,
   BACKENDS,
-  Cliente,
   WEB_URL,
+  Cliente,
   aguardarAte,
   comBackend,
+  descreveComLogin,
   navegador,
   pagamento,
   parceiro,
@@ -111,7 +112,7 @@ describe("seleção de backend", () => {
   });
 });
 
-describe("a troca muda quem responde", () => {
+descreveComLogin("a troca muda quem responde", () => {
   it("o gateway despacha para a implementação selecionada", async () => {
     const cliente = navegador();
 
@@ -187,7 +188,7 @@ describe("a troca muda quem responde", () => {
   });
 });
 
-describe("a troca muda os DADOS, não só a rota", () => {
+descreveComLogin("a troca muda os DADOS, não só a rota", () => {
   it("um evento entregue a um backend é visível pelo OUTRO", async () => {
     // A propriedade que o schema compartilhado entrega: a troca muda a
     // IMPLEMENTAÇÃO, e não os dados.
@@ -248,7 +249,7 @@ describe("a troca muda os DADOS, não só a rota", () => {
   });
 });
 
-describe("os dois backends cumprem o mesmo contrato", () => {
+descreveComLogin("os dois backends cumprem o mesmo contrato", () => {
   it("respondem /health com a mesma forma", async () => {
     const cliente = navegador();
 
@@ -338,7 +339,7 @@ describe("os dois backends cumprem o mesmo contrato", () => {
   });
 });
 
-describe("ORM e persistência em ambos os backends", () => {
+descreveComLogin("ORM e persistência em ambos os backends", () => {
   it.each([
     { id: "dotnet" as const, orm: "EF Core" },
     { id: "vinext" as const, orm: "Prisma" },
@@ -380,7 +381,7 @@ describe("ORM e persistência em ambos os backends", () => {
   });
 });
 
-describe("reenfileiramento manual", () => {
+descreveComLogin("reenfileiramento manual", () => {
   // O botao do painel chama este endpoint. Aqui ele e exercitado pelo gateway,
   // nos DOIS backends, com os mesmos casos - porque o painel e um so e o
   // operador nao pode receber respostas diferentes conforme o backend ativo.
@@ -451,7 +452,7 @@ describe("reenfileiramento manual", () => {
   });
 });
 
-describe("diagnóstico de falha no contrato da API", () => {
+descreveComLogin("diagnóstico de falha no contrato da API", () => {
   it.each(BACKENDS)("$nome explica um payload inválido em português", async ({ id }) => {
     // O tooltip do painel é montado com estes campos. Se o backend não os
     // devolvesse, o operador voltaria a ver só a mensagem crua da validação.

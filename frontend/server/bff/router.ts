@@ -126,6 +126,17 @@ async function despachar(request: BffRequest): Promise<BffResponse> {
         backend: "vinext",
         version: "1.0.0",
         environment: bffConfig.isProduction ? "Production" : "Development",
+
+        // Ha provedor de e-mail configurado? Um booleano em forma de rotulo, e
+        // nao a chave nem o remetente: quem consulta precisa saber SE envia, nao
+        // com o que.
+        //
+        // Existe para a suite ponta a ponta poder decidir se roda. Ela autentica
+        // com enderecos inventados, e com provedor ativo cada login vira um hard
+        // bounce na conta - 26 deles aconteceram antes de isto existir. A
+        // alternativa seria descobrir enviando, o que e autodestrutivo: para
+        // saber se envia, envia.
+        email_provider: bffConfig.brevo.apiKey ? "brevo" : "none",
       },
     };
   }

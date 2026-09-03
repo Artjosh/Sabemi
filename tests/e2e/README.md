@@ -30,6 +30,49 @@ pnpm test
 > Brevo, que é o comportamento certo dela — mas o estrago é acumulativo e não se
 > desfaz.
 
+### Com provedor ativo, os testes de login se pulam
+
+Rodar a suíte contra uma stack que tem provedor não falha nem envia nada: os 47
+testes que autenticam são **pulados**, e os 3 que não dependem de login rodam.
+
+Quem decide é o [`global-setup.ts`](global-setup.ts), antes da coleta. Ele
+consulta o `/health` dos dois backends e lê o campo `email_provider` — um rótulo
+(`brevo` / `none`), sem chave nem remetente. A detecção é **real**: pergunta à
+stack em execução, não à variável de ambiente do shell que a invocou, que pode
+divergir do que o container recebeu. E não descobre enviando, o que seria
+autodestrutivo.
+
+O resultado vira `E2E_EMAIL_PROVIDER_ATIVO` (`0` / `1`), lido em
+[`support.ts`](support.ts) como `EMAIL_PROVIDER_ATIVO`. Os arquivos de teste não
+o consultam direto: usam `descreveComLogin`, um `describe` que se pula quando há
+provedor. Assim a dependência de sessão fica declarada no lugar onde ela existe —
+o bloco — e não repetida como condição em onze pontos, que é onde se esquece um.
+
+O skip é **ruidoso de propósito** — um bloco de aviso na saída, dizendo em qual
+backend o provedor está ativo e qual comando roda a suíte completa. Teste pulado
+em silêncio é pior do que teste falhando: a suíte termina verde e ninguém sabe
+que 47 verificações não rodaram.
+
+Três coisas que este desenho preserva:
+
+- **A stack fora do ar continua sendo erro**, não motivo para pular. Sem ela
+  nada aqui faz sentido, e a mensagem traz o comando que resolve.
+- **A guarda dentro de `sessaoAutenticada` permanece.** Se a suíte for
+  invocada sem o `globalSetup` — um arquivo isolado, outro runner —, o primeiro
+  login que veja `email_sent: true` aborta. O skip é o caminho normal; a guarda
+  é a rede.
+- **Nada de autenticação deixa de ser coberto.** Pular é a resposta certa para
+  a máquina do desenvolvedor, onde o provedor está ligado de propósito. No CI é
+  a resposta errada: lá a suíte responde pela cobertura de autenticação, e um job
+  verde com 47 testes pulados afirmaria algo falso. Então, com `CI` no ambiente,
+  provedor ativo **falha** em vez de pular — a regra é imposta, não esperada.
+
+Para exercitar o envio de e-mail, que estes testes deliberadamente **não** fazem:
+
+```bash
+node scripts/verificar-email.mjs voce@exemplo.com
+```
+
 Para apontar para outro ambiente:
 
 ```bash

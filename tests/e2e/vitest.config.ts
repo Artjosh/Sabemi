@@ -20,6 +20,12 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     include: ["**/*.e2e.test.ts"],
+
+    // Consulta o `/health` dos dois backends ANTES da coleta, para os testes de
+    // autenticacao poderem ser pulados quando ha provedor de e-mail ativo - ver
+    // global-setup.ts. Tambem falha cedo, com o comando certo na mensagem, se a
+    // stack nao estiver no ar.
+    globalSetup: ["./global-setup.ts"],
     testTimeout: 120_000,
     hookTimeout: 60_000,
 

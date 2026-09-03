@@ -368,10 +368,10 @@ sintaxe `${VAR:?mensagem}` impede que um valor de desenvolvimento chegue lá.
 
 ## Testes
 
-**641 testes** no total.
+**642 testes** no total.
 
 ```bash
-# Backend .NET — 255 testes (unidade + integração com PostgreSQL real)
+# Backend .NET — 256 testes (unidade + integração com PostgreSQL real)
 cd backend-dotnet
 dotnet test Sabemi.slnx --settings coverlet.runsettings --results-directory TestResults
 python scripts/check-coverage.py TestResults --min 80
@@ -402,7 +402,14 @@ cd tests/e2e && pnpm install && pnpm test
 ```
 
 O teto de login é elevado porque a suíte faz dezenas de autenticações do mesmo IP
-em segundos — em produção o limite é 10/min. Detalhes em
+em segundos — em produção o limite é 10/min.
+
+`BREVO_API_KEY=` e `SMTP_HOST=` vazios porque a suíte autentica com endereços
+inventados: com provedor ativo, a stack enviaria de verdade e cada login viraria
+um hard bounce. Esquecer disso não custa mais nada — antes da coleta, a suíte
+consulta o `/health` dos dois backends e, achando provedor, **pula** os 47 testes
+que autenticam com um aviso na saída, em vez de falhar ou enviar. No CI, onde
+pular seria mentir sobre cobertura, provedor ativo **falha**. Detalhes em
 [`tests/e2e/README.md`](tests/e2e/README.md).
 
 Varredura rápida da stack:
@@ -414,7 +421,7 @@ bash scripts/smoke-test.sh
 ### Verificar o envio de e-mail
 
 Isto **não** está na suíte: envia um e-mail de verdade, depende de rede e de
-cota, e a suíte E2E aborta justamente quando há provedor ativo. É um verificador
+cota, e a suíte E2E se pula justamente quando há provedor ativo. É um verificador
 sob demanda:
 
 ```bash

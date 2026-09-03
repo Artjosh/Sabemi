@@ -16,6 +16,32 @@
  * permite exercitar a sessao em cookie httpOnly de ponta a ponta.
  */
 
+import { describe } from "vitest";
+
+/**
+ * Ha provedor de e-mail ativo na stack?
+ *
+ * Preenchida pelo `global-setup.ts`, que consulta o `/health` dos dois backends
+ * antes da coleta. Quem consome e o `descreveComLogin` abaixo, para PULAR os
+ * blocos que autenticam: eles usam enderecos inventados, e com provedor ativo
+ * cada login vira um hard bounce na conta.
+ *
+ * Ausente = a suite foi rodada sem o globalSetup (um arquivo isolado, por
+ * exemplo). Nesse caso vale `false`, que e o comportamento anterior: os testes
+ * rodam. A guarda em `sessaoAutenticada` continua sendo a rede de seguranca.
+ */
+export const EMAIL_PROVIDER_ATIVO = process.env.E2E_EMAIL_PROVIDER_ATIVO === "1";
+
+/**
+ * `describe` para blocos que precisam de uma sessao autenticada.
+ *
+ * Identico a `describe`, exceto que se pula quando ha provedor de e-mail ativo.
+ * Existe para o arquivo de teste declarar a dependencia UMA vez, em vez de
+ * repetir `describe.skipIf(EMAIL_PROVIDER_ATIVO)` em cada bloco - onze deles
+ * hoje, e a repeticao e onde se esquece um.
+ */
+export const descreveComLogin = describe.skipIf(EMAIL_PROVIDER_ATIVO);
+
 export const API_URL = process.env.E2E_API_URL ?? "http://localhost:8080";
 export const WEB_URL = process.env.E2E_WEB_URL ?? "http://localhost:3000";
 export const API_KEY = process.env.E2E_API_KEY ?? "sabemi-dev-api-key";

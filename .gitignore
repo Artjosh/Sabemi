@@ -23,3 +23,6 @@ frontend/generated/
 .DS_Store
 .vs/
 .idea/
+
+# Cache incremental do TypeScript: artefato de build, muda a cada `tsc`.
+*.tsbuildinfo

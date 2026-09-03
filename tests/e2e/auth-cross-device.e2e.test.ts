@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   BACKENDS,
-  Cliente,
   WEB_URL,
+  Cliente,
   aguardarAte,
+  descreveComLogin,
   navegador,
 } from "./support";
 
@@ -46,7 +47,7 @@ function consultar(desktop: Cliente, selector: string) {
   }>("/api/auth/login?step=poll", { selector });
 }
 
-describe("autenticação cross-device por polling", () => {
+descreveComLogin("autenticação cross-device por polling", () => {
   it("o desktop entra sozinho depois que o celular abre o link", async () => {
     const desktop = navegador();
     const email = `cross-${Date.now()}@sabemi.com.br`;
@@ -179,7 +180,7 @@ describe("autenticação cross-device por polling", () => {
  * demonstracao mais direta de que a feature foi reproduzida nos dois, e nao
  * apenas no primario.
  */
-describe.each(BACKENDS)("autenticação no backend $nome", (backend) => {
+descreveComLogin.each(BACKENDS)("autenticação no backend $nome", (backend) => {
   it("completa o login cross-device", async () => {
     const desktop = navegador();
 
@@ -212,7 +213,7 @@ describe.each(BACKENDS)("autenticação no backend $nome", (backend) => {
   });
 });
 
-describe("o token de sessão nunca alcança o navegador", () => {
+descreveComLogin("o token de sessão nunca alcança o navegador", () => {
   it("nenhuma resposta do fluxo de login contém o JWT", async () => {
     // A propriedade central do padrão BFF adotado. Se o token aparecesse em
     // qualquer corpo, um XSS no painel poderia lê-lo com response.json().

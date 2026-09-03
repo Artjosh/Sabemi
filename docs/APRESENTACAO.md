@@ -851,12 +851,12 @@ publicados, e rodam com **usuário sem privilégios**.
 
 ## 16. Testes
 
-**641 testes.** Cobertura de **83,8 %** no backend .NET e **89,2 %** de linhas no
+**642 testes.** Cobertura de **83,8 %** no backend .NET e **89,2 %** de linhas no
 frontend — ambos acima do mínimo de 80 % exigido, verificado no pipeline.
 
 | Suíte                  | Testes  | Ambiente                                    |
 | ---------------------- | ------- | ------------------------------------------- |
-| .NET — unidade         | 169     | Sem I/O: domínio, validação, HMAC, clientes HTTP com handler falso |
+| .NET — unidade         | 170     | Sem I/O: domínio, validação, HMAC, clientes HTTP com handler falso |
 | .NET — integração      | 86      | PostgreSQL real (Testcontainers)            |
 | Frontend — node        | 282     | PostgreSQL real                             |
 | Frontend — componentes | 54      | jsdom + Testing Library                     |
@@ -881,6 +881,39 @@ nenhum outro nível alcança:
 - o reenfileiramento **recusa** um evento já processado com sucesso, nos dois
   backends, com a mesma mensagem — a proteção que impede dois cliques de dobrar
   o valor liquidado de um contrato.
+
+### O teste que não deve rodar, e como pular sem mentir
+
+A suíte E2E autentica com endereços inventados. Se a stack tiver provedor de
+e-mail configurado, ela envia para eles de verdade — e cada um vira um **hard
+bounce**, que é exatamente o que corrói reputação de envio. Aconteceu neste
+projeto: uma execução com SMTP ativo gerou 26 bounces antes de alguém perceber.
+
+O primeiro remédio foi abortar: a suíte falhava com a instrução de subir a stack
+sem provedor. Funcionava, mas ensinava a coisa errada — um vermelho que não é
+defeito treina a ignorar vermelho.
+
+A solução foi pular, com três cuidados:
+
+**A detecção é real.** O `globalSetup` consulta o `/health` dos dois backends
+antes da coleta e lê `email_provider`, um rótulo (`brevo` / `none`) que os dois
+backends passaram a expor. Perguntar à stack em execução, e não à variável do
+shell que a invocou: o container pode ter subido com outro valor, e é o container
+que envia. E não se descobre enviando — isso seria autodestrutivo.
+
+**O skip é ruidoso.** Um bloco de aviso na saída diz em qual backend o provedor
+está ativo e qual comando roda a suíte completa. Teste pulado em silêncio é pior
+do que teste falhando: a suíte termina verde e ninguém sabe que 47 verificações
+não rodaram.
+
+**A guarda que abortava continua lá.** Ela cobre a suíte invocada sem o
+`globalSetup`. Skip é o caminho normal; abortar é a rede de segurança.
+
+E o skip não vira buraco de cobertura, porque **no CI a regra se inverte**: lá,
+provedor ativo é erro. Pular é a resposta certa na máquina do desenvolvedor, onde
+o provedor está ligado de propósito; no pipeline, que é quem responde pela
+cobertura de autenticação, um job verde com 47 testes pulados afirmaria algo
+falso. Os 50 rodam sempre — imposto, não esperado.
 
 ### Por que banco de verdade, e não provider em memória
 
