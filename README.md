@@ -166,33 +166,146 @@ pnpm dev
 
 ---
 
-## Variáveis de ambiente
+## Configuração
 
-Copie `.env.example` para `.env`. Tudo tem padrão de desenvolvimento; o compose
-sobe sem configurar nada.
+Copie `.env.example` para `.env`. **Tudo tem padrão de desenvolvimento** — o
+compose sobe sem você configurar nada. Há dois arquivos:
 
-| Variável                    | Para que serve                                                       |
-| --------------------------- | -------------------------------------------------------------------- |
-| `DATABASE_URL`              | Conexão do banco — **a mesma para os dois backends**                 |
-| `JWT_SECRET`                | Assina a sessão. Mín. 32 caracteres, o mesmo nos dois backends       |
-| `WEBHOOK_API_KEY`           | Valor esperado no header `X-Api-Key`                                 |
-| `WEBHOOK_SIGNATURE_SECRET`  | Segredo do HMAC-SHA256 (`X-Signature`). Vazio desliga                |
-| `WEBHOOK_REQUIRE_SIGNATURE` | `true` exige assinatura em toda chamada                              |
-| `AUTH_PROVIDER`             | `local` (padrão) ou `supabase` — quem valida a identidade            |
-| `AUTH_EXPOSE_LOGIN_CODES`   | Entrega link e código na resposta. Padrão: ligado fora de produção    |
-| `AUTH_RATE_LIMIT`           | Pedidos de login por minuto e por IP (padrão 10)                     |
-| `BREVO_API_KEY`             | Ativa o envio real do e-mail de acesso. Vazio = link no log          |
-| `BREVO_SENDER_EMAIL`        | Remetente. Precisa ser de um domínio **verificado** na Brevo         |
-| `SUPABASE_URL` / `_ANON_KEY`| GoTrue, quando `AUTH_PROVIDER=supabase`                              |
-| `SMTP_*`                    | Usadas **pelo GoTrue**, não pelos backends. Preencha os três ou nenhum |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Liga o tracing. Vazio = só métricas                                |
-| `API_PUBLIC_URL`            | Base do link de acesso — precisa ser alcançável pelo navegador       |
-| `FRONTEND_PUBLIC_URL`       | Idem, para o backend VINEXT                                          |
-| `PROCESSING_*`              | Duração da regra simulada, tamanho do lote, tentativas               |
+| Arquivo             | Quem lê                                                     |
+| ------------------- | ----------------------------------------------------------- |
+| `.env` (raiz)       | O Docker Compose, que repassa aos três containers            |
+| `frontend/.env`     | Só quem roda `pnpm dev` **fora** do Docker                   |
 
-Em produção, `docker-compose.prod.yml` **recusa subir** sem os segredos reais.
+Nenhuma variável do frontend pode receber o prefixo `NEXT_PUBLIC_`: são segredos
+e configuração de servidor, e o prefixo as empacotaria no bundle do browser.
+
+### Banco
+
+| Variável | Para que serve |
+| --- | --- |
+| `DATABASE_URL` | Conexão — **a mesma para os dois backends** |
+| `POSTGRES_*` | Superusuário. Usado pela plataforma Supabase e pelas migrations |
+| `APP_DB_USER` / `APP_DB_PASSWORD` | Papel da aplicação. Os backends não usam `postgres` |
+
+**`DATABASE_URL` vazia** faz o compose usar o Postgres desta stack. Preenchida,
+ela vence — é assim que se aponta para um Supabase remoto (veja acima).
+
+O .NET aceita tanto o formato URL quanto o nativo do Npgsql. Antes ele exigia
+`ConnectionStrings__Postgres` em sintaxe própria, e apontar a stack para outro
+banco significava transcrever a mesma informação em dois formatos — com um erro
+de transcrição aparecendo como falha de autenticação em apenas um dos backends.
+
+> **Não acrescente `?schema=` na URL.** O parâmetro é desnecessário (cada ORM
+> qualifica as tabelas pelo schema do modelo) e o driver `pg` o interpretava como
+> o **usuário** da conexão, produzindo
+> `password authentication failed for user "sabemi"` — um erro que aponta para
+> credenciais quando a causa é o parser da URL.
+
+### Autenticação
+
+| Variável | Para que serve |
+| --- | --- |
+| `AUTH_PROVIDER` | `local` (magic link próprio) ou `supabase` (GoTrue) |
+| `AUTH_EXPOSE_LOGIN_CODES` | Entrega link e código na resposta |
+| `AUTH_RATE_LIMIT` | Pedidos de login por minuto, por IP |
+| `JWT_SECRET` | Assina a sessão. Mín. 32 caracteres, **o mesmo nos dois backends** |
+| `API_PUBLIC_URL` / `FRONTEND_PUBLIC_URL` | Base do link de acesso |
+
+`AUTH_EXPOSE_LOGIN_CODES` vazio segue o ambiente: ligado fora de produção,
+desligado em produção. Um valor explícito vence nos dois sentidos — e ligá-lo em
+produção registra um aviso na inicialização, porque nesse modo **qualquer um que
+peça acesso com um e-mail entra como aquele e-mail**.
+
+As URLs públicas precisam ser alcançáveis pelo **navegador**, possivelmente de
+outro aparelho: para testar o fluxo cross-device na sua rede, troque `localhost`
+pelo IP da máquina.
+
+`AUTH_RATE_LIMIT=10` é o valor de produção. A suíte ponta a ponta sobe a stack
+com `500` porque faz dezenas de logins do mesmo IP em segundos — enfraquecer o
+limite para todo mundo seria pior.
+
+### E-mail
+
+| Variável | Para que serve |
+| --- | --- |
+| `BREVO_API_KEY` | Ativa o envio real. Vazio = link vai só para o log |
+| `BREVO_SENDER_EMAIL` | Remetente. Precisa ser de um domínio **verificado** na Brevo |
+| `SMTP_*` | Usadas **pelo GoTrue**, não pelos backends |
+
+Os dois backends usam a **mesma conta e o mesmo remetente**: o e-mail de acesso é
+o mesmo produto, venha de qual backend vier.
+
+Se o remetente não for de um domínio verificado, a Brevo recusa com `400` — e a
+mensagem dela não deixa isso óbvio. O log do backend mostra o corpo da resposta.
+
+> **Nas `SMTP_*`, preencha os três ou nenhum.** O GoTrue só registra o link no
+> log quando **não há** host de SMTP. Com host definido e sem usuário/senha, ele
+> tenta enviar, falha, e o pedido de acesso volta sem link em lugar nenhum — o
+> login fica sem saída.
+
+### Supabase
+
+| Variável | Para que serve |
+| --- | --- |
+| `SUPABASE_URL` | Gateway. `http://localhost:54321` local, `https://SEU_REF.supabase.co` remoto |
+| `SUPABASE_ANON_KEY` | Chave pública, exigida pelo Kong |
+| `SUPABASE_SERVICE_ROLE_KEY` | Chave administrativa. **Não** é usada no fluxo de login |
+| `SUPABASE_JWT_SECRET` | Segredo que assina as três chaves acima |
+
+As chaves são **derivadas** do `SUPABASE_JWT_SECRET`: trocar o segredo sem
+regenerá-las quebra a plataforma. Regenere as três de uma vez:
+
+```bash
+node supabase/gerar-chaves.mjs
+```
+
+A `service_role` ignora RLS e permite administrar usuários. O fluxo de acesso não
+precisa dela — manter a chave privilegiada fora do caminho quente reduz o estrago
+de um log vazado.
+
+### Webhook
+
+| Variável | Para que serve |
+| --- | --- |
+| `WEBHOOK_API_KEY` | Valor esperado no header `X-Api-Key` |
+| `WEBHOOK_SIGNATURE_SECRET` | Segredo do HMAC-SHA256 (`X-Signature`). Vazio desliga |
+| `WEBHOOK_REQUIRE_SIGNATURE` | `true` exige assinatura em toda chamada |
+
+A `ApiKey` diz **quem** está chamando; a assinatura diz que o **corpo está
+intacto**. Em produção deixe `WEBHOOK_REQUIRE_SIGNATURE=true` — a ApiKey sozinha
+não protege o conteúdo.
+
+### Processamento
+
+| Variável | Para que serve |
+| --- | --- |
+| `PROCESSING_SIMULATED_WORK` / `_MS` | A regra pesada simulada (~2 s) |
+| `PROCESSING_BATCH_SIZE` | Itens reivindicados por ciclo |
+| `PROCESSING_MAX_ATTEMPTS` | Tentativas antes da falha definitiva |
+
+Há duas variáveis para a duração porque os formatos diferem: o .NET usa
+`TimeSpan` (`00:00:02`) e o Node, milissegundos. **É este o tempo que o webhook
+não paga** — ele responde antes, e o processamento acontece em outro processo.
+
+### Observabilidade
+
+| Variável | Para que serve |
+| --- | --- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Liga o tracing. Vazio = só métricas |
+| `OTEL_SERVICE_NAMESPACE` | Agrupa os serviços no coletor |
+
+As métricas estão **sempre** ligadas e não dependem de nada externo. O tracing é
+opcional: sem endpoint, a stack sobe normalmente.
+
+Use `4318` (OTLP/HTTP), e não `4317` (gRPC): o .NET aceita os dois, mas o
+exportador do BFF só fala HTTP — apontar para a porta errada faz os traces do
+VINEXT sumirem em silêncio, porque o exportador falha em segundo plano sem
+derrubar nada.
 
 ---
+
+Em produção, `docker-compose.prod.yml` **recusa subir** sem os segredos reais: a
+sintaxe `${VAR:?mensagem}` impede que um valor de desenvolvimento chegue lá.
 
 ## Testes
 
