@@ -1,26 +1,4 @@
 {
-  // Configuração isolada: este diretório é um pacote próprio, com o próprio
-  // `package.json`, e não há `pnpm-workspace.yaml` no repositório. Ele não
-  // herda `node_modules` da raiz nem do frontend.
-  //
-  // NÃO HÁ CHAVE `types` AQUI, e isso é deliberado.
-  //
-  // Ela existia como `["vitest/globals", "node"]` e era a causa de um erro
-  // recorrente no editor: "Cannot find type definition file for 'node'".
-  // Quando um nome dessa lista não resolve — e sob pnpm, com os pacotes atrás
-  // de symlinks, isso acontece com facilidade em ferramentas que resolvem de
-  // formas diferentes — o TypeScript falha no carregamento da biblioteca e
-  // **para de verificar todo o resto**. Três erros de tipo reais sobreviveram
-  // assim, escondidos atrás de um erro de configuração.
-  //
-  // Sem a chave, o comportamento padrão vale: todo pacote em
-  // `node_modules/@types` é incluído automaticamente. `@types/node` está nas
-  // devDependencies, então `process` e `crypto` continuam tipados — sem uma
-  // lista que possa deixar de resolver.
-  //
-  // E `vitest/globals` nunca foi necessário: os três arquivos de teste importam
-  // `describe`, `it` e `expect` de "vitest" explicitamente, e `support.ts` não
-  // usa nenhum global.
   "compilerOptions": {
     "target": "ES2023",
     "lib": ["ES2023", "DOM"],

@@ -62,6 +62,37 @@ São **50 testes**. Três exemplos do que só este nível pega:
 - **O worker de outro processo.** Os testes de integração chamam o ciclo de
   processamento diretamente; aqui ninguém chama nada — o worker acorda sozinho.
 
+## Sobre a configuração do TypeScript
+
+Este diretório é um **pacote isolado**: tem `package.json` próprio e não há
+`pnpm-workspace.yaml` no repositório, então ele não herda `node_modules` da raiz
+nem do frontend. Toda dependência de tipo precisa estar nas devDependencies
+dele — foi o caso do `@types/node`, que faltava.
+
+**O `tsconfig.json` não declara `types`, e isso é deliberado.** Ele já declarou
+(`["vitest/globals", "node"]`), e a lista era um ponto de falha: quando um nome
+dela não resolve — e sob pnpm, com os pacotes atrás de symlinks, ferramentas
+diferentes resolvem de formas diferentes — o TypeScript falha no carregamento da
+biblioteca e **para de verificar todo o resto**. Três erros de tipo reais
+sobreviveram assim, escondidos atrás de um erro de configuração.
+
+Sem a chave, vale o comportamento padrão: todo pacote em `node_modules/@types`
+entra automaticamente. E `vitest/globals` nunca foi necessário — os arquivos de
+teste importam `describe`, `it` e `expect` de `"vitest"` explicitamente.
+
+O ganho não é só um erro a menos: se `@types/node` faltar de novo, a falha aponta
+para o **uso** (`process` não existe) em vez de para a configuração, e não cega o
+verificador.
+
+```bash
+pnpm typecheck    # a fonte de verdade
+```
+
+> Se o editor acusar `Cannot find type definition file for 'node'` mesmo com o
+> `pnpm typecheck` limpo, é estado do servidor de tipos, não do projeto: ele
+> guarda o diagnóstico do `tsconfig` que leu ao abrir. "TypeScript: Restart TS
+> Server" resolve; recarregar a janela, sempre.
+
 ## Por que sem navegador automatizado
 
 A lógica de interface já é coberta pelos testes de componente (jsdom +
