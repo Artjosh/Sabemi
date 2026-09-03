@@ -10,6 +10,7 @@ using Sabemi.Infrastructure.Queue;
 using Sabemi.Infrastructure.Security;
 using Microsoft.Extensions.Options;
 using Sabemi.Infrastructure.Email;
+using Sabemi.Infrastructure.Auth;
 
 namespace Sabemi.Infrastructure;
 
@@ -79,6 +80,62 @@ public static class DependencyInjection
         services.AddSingleton<IClock, SystemClock>();
         services.AddScoped<ITokenIssuer, JwtTokenIssuer>();
         services.AddScoped<IPaymentBusinessRule, SimulatedPaymentBusinessRule>();
+        // -------------------------------------------- provedor de identidade
+        //
+        // Quem envia o desafio de acesso e quem valida o codigo. O pedido de
+        // login (selector, polling, uso unico) e SEMPRE local - ver
+        // IIdentityProvider -, porque e ele que da o cross-device e o GoTrue nao
+        // tem esse conceito.
+        //
+        //   AUTH_PROVIDER=local      (padrao) magic link e OTP proprios
+        //   AUTH_PROVIDER=supabase   GoTrue emite, envia e valida
+        //
+        // A escolha e feita AQUI, na subida, e nao a cada login: assim ela
+        // aparece no log de inicializacao e um erro de configuracao e descoberto
+        // antes de alguem tentar entrar.
+        var provedor = (configuration["AUTH_PROVIDER"] ?? "local").Trim().ToLowerInvariant();
+
+        services.AddOptions<SupabaseAuthOptions>()
+            .Bind(configuration.GetSection(SupabaseAuthOptions.SectionName))
+            .ValidateOnStart();
+
+        if (provedor is "supabase")
+        {
+            var supabase = new SupabaseAuthOptions();
+            configuration.GetSection(SupabaseAuthOptions.SectionName).Bind(supabase);
+
+            if (!supabase.Configurado)
+            {
+                // Falha na SUBIDA, e nao no primeiro login. Cair para o modo
+                // local em silencio seria pior: quem pediu Supabase acharia que
+                // esta usando Supabase, e o comportamento observavel e quase
+                // igual - ate o dia em que alguem procura o usuario no painel do
+                // Supabase e nao o encontra.
+                throw new InvalidOperationException(
+                    "AUTH_PROVIDER=supabase exige SUPABASE_URL e SUPABASE_ANON_KEY. "
+                    + "Configure-as (ver .env) ou use AUTH_PROVIDER=local.");
+            }
+
+            services.AddHttpClient<IIdentityProvider, SupabaseIdentityProvider>(
+                (sp, cliente) =>
+                {
+                    var o = sp.GetRequiredService<IOptions<SupabaseAuthOptions>>().Value;
+
+                    cliente.BaseAddress = new Uri(o.Url);
+                    cliente.Timeout = o.Timeout;
+
+                    // `apikey` e o header que o Kong exige antes de encaminhar ao
+                    // GoTrue. A chave `anon` basta: o fluxo de acesso nao precisa
+                    // da `service_role`, e manter a chave privilegiada fora do
+                    // caminho quente reduz o estrago de um log vazado.
+                    cliente.DefaultRequestHeaders.Add("apikey", o.AnonKey);
+                });
+        }
+        else
+        {
+            services.AddScoped<IIdentityProvider, LocalIdentityProvider>();
+        }
+
         // Entrega do e-mail de acesso: Brevo quando ha chave, log quando nao ha.
         //
         // A decisao e feita AQUI, na subida, e nao dentro do remetente. Um

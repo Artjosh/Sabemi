@@ -203,6 +203,31 @@ services:
     ports:
       - "${SUPABASE_STUDIO_PORT:-54323}:3000"
 
+  # ------------------------------------------- os backends, no modo supabase
+  #
+  # Estes tres blocos existem por um motivo so: dentro da rede do Compose,
+  # `localhost:54321` NAO e o Kong - e o proprio container. O `.env` traz a URL
+  # PUBLICA, que e a certa para o navegador e para o `redirect_to` do magic
+  # link, mas erradissima para uma chamada servidor-a-servidor.
+  #
+  # Sem esta sobrescrita, `AUTH_PROVIDER=supabase` sobe sem erro e falha no
+  # primeiro login com "connection refused" - a stack parece de pe e o acesso
+  # simplesmente nao funciona.
+  #
+  # O Studio (acima) resolve o mesmo problema do mesmo jeito: `SUPABASE_URL`
+  # interno, `SUPABASE_PUBLIC_URL` para o browser.
+  api:
+    environment:
+      Supabase__Url: ${SUPABASE_INTERNAL_URL:-http://supabase-kong:8000}
+
+  worker:
+    environment:
+      Supabase__Url: ${SUPABASE_INTERNAL_URL:-http://supabase-kong:8000}
+
+  frontend:
+    environment:
+      SUPABASE_URL: ${SUPABASE_INTERNAL_URL:-http://supabase-kong:8000}
+
 volumes:
   supabase_db:
     driver: local

@@ -83,6 +83,20 @@ services:
       Jwt__Secret: ${JWT_SECRET:-troque-este-segredo-em-producao-com-no-minimo-32-caracteres}
       Auth__PublicBaseUrl: ${API_PUBLIC_URL:-http://localhost:8080}
 
+      # ------------------------------------------- provedor de identidade
+      #
+      # `local`    (padrao) magic link e OTP proprios, com hash no banco
+      # `supabase` o GoTrue emite, envia e valida o desafio de acesso
+      #
+      # Em AMBOS os modos o pedido de login (selector + polling) e local: e ele
+      # que da o cross-device, e o GoTrue nao tem esse conceito.
+      #
+      # No modo `supabase`, suba tambem o overlay da plataforma:
+      #   docker compose -f docker-compose.yml -f docker-compose.supabase.yml up -d
+      AUTH_PROVIDER: ${AUTH_PROVIDER:-local}
+      Supabase__Url: ${SUPABASE_URL:-}
+      Supabase__AnonKey: ${SUPABASE_ANON_KEY:-}
+
       # E-mail de acesso pela Brevo. A MESMA conta que o backend VINEXT usa: o
       # e-mail e o mesmo produto, venha de qual backend vier, e duas contas
       # dariam duas reputacoes de envio a cuidar.
@@ -224,6 +238,15 @@ services:
       WEBHOOK_REQUIRE_SIGNATURE: ${WEBHOOK_REQUIRE_SIGNATURE:-false}
 
       PROCESSING_SIMULATED_WORK_MS: ${PROCESSING_SIMULATED_WORK_MS:-2000}
+
+      # Provedor de identidade - o MESMO modo da API .NET. Os dois backends
+      # compartilham a tabela de pedidos de login, entao rodar em modos
+      # diferentes faria um deles nao conseguir validar o pedido criado pelo
+      # outro. (O `provedor` gravado na linha impede que isso corrompa algo: o
+      # pedido e simplesmente recusado - ver IdentityProvider.)
+      AUTH_PROVIDER: ${AUTH_PROVIDER:-local}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
 
       # E-mail de acesso pela Brevo - a MESMA conta e o MESMO remetente da API
       # .NET. Chave vazia = sem envio real, e o link vai para o log.

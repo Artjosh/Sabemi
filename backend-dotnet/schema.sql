@@ -282,3 +282,21 @@ BEGIN
 END $EF$;
 COMMIT;
 
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM sabemi."__EFMigrationsHistory" WHERE "MigrationId" = '20260902173802_ProvedorDeIdentidade') THEN
+    ALTER TABLE sabemi.login_requests ADD provedor character varying(16) NOT NULL DEFAULT 'LOCAL';
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM sabemi."__EFMigrationsHistory" WHERE "MigrationId" = '20260902173802_ProvedorDeIdentidade') THEN
+    INSERT INTO sabemi."__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+    VALUES ('20260902173802_ProvedorDeIdentidade', '10.0.11');
+    END IF;
+END $EF$;
+COMMIT;
+

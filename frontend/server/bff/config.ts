@@ -69,6 +69,36 @@ export const bffConfig = {
   },
 
   /**
+   * GoTrue (Supabase Auth), usado quando `AUTH_PROVIDER=supabase`.
+   *
+   * A unica coisa que muda entre o GoTrue local (docker-compose.supabase.yml) e
+   * um projeto hospedado e a URL e a chave - a mesma propriedade que a conexao
+   * do banco tem.
+   */
+  supabase: {
+    /**
+     * Base do gateway: `http://localhost:54321` local, ou
+     * `https://SEU_REF.supabase.co` remoto. Os caminhos do GoTrue ficam sob
+     * `/auth/v1`.
+     */
+    url: env("SUPABASE_URL", ""),
+
+    /**
+     * Chave `anon`. Vai no header `apikey`, que o Kong exige antes de encaminhar
+     * ao GoTrue. E publica por desenho - existe para ser embutida em cliente de
+     * browser; o que autoriza de fato e o proprio fluxo do GoTrue (posse da
+     * caixa de e-mail).
+     *
+     * A `service_role` NAO e usada no fluxo de login: ela ignora RLS e permite
+     * administrar usuarios, e o acesso nao precisa disso.
+     */
+    anonKey: env("SUPABASE_ANON_KEY", ""),
+
+    /** 10s, pelo mesmo motivo da Brevo: quem espera e o usuario na tela. */
+    timeoutMs: envInt("SUPABASE_TIMEOUT_MS", 10_000),
+  },
+
+  /**
    * Envio do e-mail de acesso pela Brevo.
    *
    * A MESMA conta que o backend .NET usa: o e-mail de acesso e o mesmo produto,
@@ -113,6 +143,20 @@ export const bffConfig = {
     workerEnabled: env("BFF_WORKER_ENABLED", "true") === "true",
   },
 } as const;
+
+// Qual provedor de identidade esta ativo. A diferenca entre os dois modos e
+// grande - no modo supabase o link de acesso vive dentro do GoTrue e nao aparece
+// na resposta - e descobri-la lendo o log e melhor do que descobri-la pedindo
+// acesso e nao entendendo o que voltou.
+{
+  const provedor = (process.env.AUTH_PROVIDER ?? "local").trim().toLowerCase();
+
+  console.info(
+    provedor === "supabase"
+      ? `[bff-config] Provedor de identidade: supabase (GoTrue em ${bffConfig.supabase.url}).`
+      : "[bff-config] Provedor de identidade: local (magic link e OTP proprios).",
+  );
+}
 
 // Expor codigo de acesso em producao e legitimo para uma stack de demonstracao,
 // mas nunca deve passar despercebido: se alguem promover esta configuracao a um

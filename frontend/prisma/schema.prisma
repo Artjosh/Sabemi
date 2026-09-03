@@ -179,6 +179,18 @@ model LoginRequest {
   /// Um de: PENDENTE, APROVADO.
   status String @db.VarChar(16)
 
+  /// Quem valida este pedido: LOCAL ou SUPABASE (GoTrue).
+  ///
+  /// Gravado na LINHA e nao lido da configuracao: trocar o provedor com pedidos
+  /// em voo transformaria cada um deles em algo invalidavel - o codigo local nao
+  /// seria mais comparado com o hash que existe, e o codigo do GoTrue nao
+  /// existiria. Assim, um pedido termina do mesmo jeito que comecou.
+  ///
+  /// O `@default` corresponde ao da migration do EF Core, que e quem cria a
+  /// coluna. Aqui ele existe para o `prisma migrate diff` do CI nao acusar
+  /// divergencia.
+  provedor String @default("LOCAL") @db.VarChar(16)
+
   criadoEm DateTime @map("criado_em") @db.Timestamptz(6)
   expiraEm DateTime @map("expira_em") @db.Timestamptz(6)
 

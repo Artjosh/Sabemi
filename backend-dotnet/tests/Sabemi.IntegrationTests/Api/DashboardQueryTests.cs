@@ -256,6 +256,18 @@ public class AuthExpiryTests(PostgresFixture postgres) : IAsyncLifetime
             => Task.FromResult(false);
     }
 
+    /// <summary>
+    /// O provedor LOCAL de verdade, com o envio de e-mail silenciado.
+    /// </summary>
+    /// <remarks>
+    /// Um duble do provedor inteiro tornaria estes testes inúteis: o que eles
+    /// verificam é justamente a geração e a validação do magic token e do OTP.
+    /// O único ponto substituído é o envio do e-mail, que não tem como acontecer
+    /// numa suíte de teste.
+    /// </remarks>
+    private static IIdentityProvider ProvedorLocal(FakeClock clock, IOptions<AuthOptions> opcoes)
+        => new LocalIdentityProvider(clock, new NotificadorSilencioso(), opcoes);
+
     private sealed class TokenFalso : ITokenIssuer
     {
         public (string Token, int ExpiresInSeconds) Issue(AppUser user) => ("token-de-teste", 3600);
@@ -276,7 +288,7 @@ public class AuthExpiryTests(PostgresFixture postgres) : IAsyncLifetime
         });
 
         var auth = new AuthService(
-            db, clock, new TokenFalso(), new NotificadorSilencioso(), opcoes,
+            db, clock, new TokenFalso(), ProvedorLocal(clock, opcoes), opcoes,
             NullLogger<AuthService>.Instance);
 
         return (auth, clock, db);
@@ -365,14 +377,18 @@ public class AuthExpiryTests(PostgresFixture postgres) : IAsyncLifetime
     /// Monta o servico com a opcao de exposicao em um estado especifico.
     /// </summary>
     private AuthService MontarComExposicao(SabemiDbContext db, bool producao, bool? expor)
-        => new(
-            db, new FakeClock(T0), new TokenFalso(), new NotificadorSilencioso(),
-            Options.Create(new AuthOptions
-            {
-                IsProduction = producao,
-                ExposeLoginCodesInDevelopment = expor,
-            }),
+    {
+        var clock = new FakeClock(T0);
+        var opcoes = Options.Create(new AuthOptions
+        {
+            IsProduction = producao,
+            ExposeLoginCodesInDevelopment = expor,
+        });
+
+        return new AuthService(
+            db, clock, new TokenFalso(), ProvedorLocal(clock, opcoes), opcoes,
             NullLogger<AuthService>.Instance);
+    }
 
     [Fact]
     public async Task Em_producao_o_padrao_e_nao_expor_os_codigos()

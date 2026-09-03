@@ -3,7 +3,9 @@ import { PROCESSING_STATUSES } from "@/lib/contracts";
 
 import { bffConfig } from "./config";
 import { verifySessionToken } from "./crypto";
+import type { AuthFailure } from "./auth-service";
 import {
+  aprovarComTokenDoProvedor,
   confirmMagicLink,
   getUserById,
   pollLoginStatus,
@@ -152,16 +154,49 @@ async function despachar(request: BffRequest): Promise<BffResponse> {
     };
   }
 
+  // ------------------------------------------------- modo Supabase
+  //
+  // Estas duas rotas existem apenas quando AUTH_PROVIDER=supabase. No modo local
+  // a aprovacao falha - o provedor local devolve `null` na validacao de token
+  // externo - e a pagina mostra "link invalido", que e o correto: aquele link
+  // nao pertence a este fluxo.
+  if (path === "auth/supabase/confirm" && method === "GET") {
+    // A pagina precisa de JavaScript porque o GoTrue devolve o token no
+    // FRAGMENTO da URL, que nao e enviado ao servidor - e essa a razao de ele
+    // ser usado para credenciais. So o navegador o ve.
+    return {
+      status: 200,
+      body: renderSupabaseConfirmationPage(request.searchParams.get("selector") ?? ""),
+      contentType: "text/html; charset=utf-8",
+    };
+  }
+
+  if (path === "auth/supabase/aprovar" && method === "POST") {
+    const body = safeJson(request.rawBody) as
+      | { selector?: unknown; access_token?: unknown }
+      | null;
+
+    const aprovado = await aprovarComTokenDoProvedor(body?.selector, body?.access_token);
+
+    // 401 para tudo que nao passa, sem distinguir "selector inexistente" de
+    // "token invalido" ou "e-mail divergente": essa granularidade so ajudaria
+    // quem esta sondando.
+    return aprovado
+      ? { status: 204, body: null }
+      : problem(401, "Nao foi possivel confirmar este acesso.", "supabase_approval_failed");
+  }
+
   if (path === "auth/verify-otp" && method === "POST") {
     const body = safeJson(request.rawBody) as { selector?: unknown; code?: unknown } | null;
     const resultado = await verifyOtp(body?.selector, body?.code);
 
     if (resultado.ok) return { status: 200, body: resultado.value };
 
-    const status =
-      resultado.failure === "not_found" ? 404 : resultado.failure === "too_many_attempts" ? 429 : 400;
-
-    return problem(status, resultado.message, mapAuthCode(resultado.failure));
+    return problem(
+      statusAuth(resultado.failure),
+      resultado.message,
+      mapAuthCode(resultado.failure),
+    );
   }
 
   if (path === "auth/login-status" && method === "POST") {
@@ -298,7 +333,7 @@ async function requireSession(request: BffRequest) {
   return request.token ? verifySessionToken(request.token) : null;
 }
 
-function mapAuthCode(failure: "not_found" | "invalid_code" | "too_many_attempts" | "invalid_email"): string {
+function mapAuthCode(failure: AuthFailure): string {
   switch (failure) {
     case "not_found":
       return "login_request_not_found";
@@ -306,8 +341,31 @@ function mapAuthCode(failure: "not_found" | "invalid_code" | "too_many_attempts"
       return "too_many_attempts";
     case "invalid_email":
       return "invalid_email";
+    case "provider_unavailable":
+      return "identity_provider_unavailable";
     default:
       return "invalid_code";
+  }
+}
+
+/**
+ * Status HTTP de uma falha de autenticacao.
+ *
+ * Os mesmos do backend .NET (AuthEndpoints). O 503 importa: o cliente nao errou
+ * nada quando o provedor de identidade esta fora do ar, e um 400 mandaria quem
+ * chama procurar erro no proprio pedido - com a UI dizendo "codigo incorreto"
+ * para um codigo que pode estar perfeitamente certo.
+ */
+function statusAuth(failure: AuthFailure): number {
+  switch (failure) {
+    case "not_found":
+      return 404;
+    case "too_many_attempts":
+      return 429;
+    case "provider_unavailable":
+      return 503;
+    default:
+      return 400;
   }
 }
 
@@ -395,6 +453,154 @@ function renderConfirmationPage(ok: boolean): string {
     <p>${mensagem}</p>
     <span class="tag">Backend VINEXT</span>
   </div>
+</body>
+</html>`;
+}
+
+/**
+ * Pagina que o GoTrue abre depois de validar o magic link (modo Supabase).
+ *
+ * <b>Espelho de `Sabemi.Api/Endpoints/SupabaseConfirmationPage.cs`.</b>
+ *
+ * <b>Por que existe uma pagina, e nao um redirect direto.</b> O GoTrue devolve o
+ * token de acesso no FRAGMENTO da URL (`#access_token=...`), e fragmento nao e
+ * enviado ao servidor - e essa a razao de ele ser usado para credenciais. So o
+ * navegador o ve. Entao a pagina le o fragmento, o envia por POST, e o servidor
+ * valida o token contra o GoTrue antes de aprovar o pedido.
+ *
+ * <b>Alternativa considerada.</b> O fluxo PKCE entrega o codigo na QUERY, o que
+ * dispensaria JavaScript - mas exigiria guardar um `code_verifier` por pedido,
+ * com mais uma coluna e mais um estado a expirar. Para um alvo de redirect que
+ * sempre roda em um navegador, o custo nao se justifica.
+ *
+ * <b>O que ela apaga.</b> O fragmento sai da barra de enderecos com
+ * `history.replaceState`. Sem isso, o token ficaria no historico do aparelho -
+ * que costuma ser o celular de alguem, as vezes compartilhado.
+ */
+function renderSupabaseConfirmationPage(selector: string): string {
+  // `JSON.stringify` produz o literal COM as aspas e com todo escape necessario.
+  // Concatenar com aspas simples seria uma injecao de script esperando um
+  // selector com `'` dentro.
+  const selectorJs = JSON.stringify(selector);
+
+  return `<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sabemi - Acesso</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: center;
+      background: #0f172a; color: #e2e8f0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+    }
+    .card {
+      max-width: 26rem; padding: 2.5rem 2rem; border-radius: 1rem; text-align: center;
+      background: #1e293b; border: 1px solid #334155;
+    }
+    .badge {
+      width: 3.5rem; height: 3.5rem; border-radius: 999px; margin: 0 auto 1.25rem;
+      display: grid; place-items: center; font-size: 1.75rem; font-weight: 700;
+    }
+    .aguardando { background: #1d4ed822; color: #60a5fa; }
+    .ok         { background: #16a34a22; color: #16a34a; }
+    .erro       { background: #dc262622; color: #dc2626; }
+    h1 { font-size: 1.25rem; margin: 0 0 .5rem; }
+    p { color: #94a3b8; line-height: 1.6; margin: 0; font-size: .95rem; }
+    .tag {
+      display: inline-block; margin-top: 1.5rem; padding: .25rem .625rem;
+      border-radius: 999px; font-size: .6875rem; letter-spacing: .04em;
+      text-transform: uppercase; background: #0f766e22; color: #2dd4bf;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge aguardando" id="badge">&hellip;</div>
+    <h1 id="titulo">Confirmando o acesso</h1>
+    <p id="mensagem">Um instante.</p>
+    <span class="tag">Backend VINEXT</span>
+  </div>
+
+  <script>
+    (function () {
+      var selector = ${selectorJs};
+
+      function mostrar(estado, titulo, mensagem) {
+        var badge = document.getElementById("badge");
+        badge.className = "badge " + estado;
+        badge.innerHTML = estado === "ok" ? "&#10003;" : "&#10007;";
+        document.getElementById("titulo").textContent = titulo;
+        document.getElementById("mensagem").textContent = mensagem;
+      }
+
+      // O token vem no fragmento, que so o navegador ve.
+      var fragmento = new URLSearchParams(window.location.hash.substring(1));
+      var token = fragmento.get("access_token");
+
+      // O GoTrue tambem usa o fragmento para reportar erro - um link ja usado,
+      // por exemplo. Ler isso primeiro evita mostrar "token ausente" quando a
+      // causa e conhecida.
+      var erroDoProvedor = fragmento.get("error_description") || fragmento.get("error");
+
+      // Apaga o fragmento da barra de enderecos: sem isso o token ficaria no
+      // historico do aparelho.
+      try {
+        history.replaceState(null, "", window.location.pathname + window.location.search);
+      } catch (e) {
+        // Navegador sem history API: o token no historico e um problema menor do
+        // que nao confirmar o acesso.
+      }
+
+      if (erroDoProvedor) {
+        mostrar("erro", "Link invalido", erroDoProvedor);
+        return;
+      }
+
+      if (!token || !selector) {
+        mostrar(
+          "erro",
+          "Link invalido",
+          "Este link expirou ou ja foi utilizado. Solicite um novo acesso."
+        );
+        return;
+      }
+
+      fetch("/api/bff/auth/supabase/aprovar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ selector: selector, access_token: token })
+      })
+        .then(function (r) {
+          if (r.ok) {
+            mostrar(
+              "ok",
+              "Acesso confirmado",
+              "Pode voltar para a aba onde voce iniciou o login. Ela entrara sozinha em alguns segundos."
+            );
+          } else {
+            mostrar(
+              "erro",
+              "Link invalido",
+              "Este link expirou ou ja foi utilizado. Solicite um novo acesso."
+            );
+          }
+        })
+        .catch(function () {
+          // A mensagem NAO manda recarregar: o fragmento com o token ja foi
+          // apagado, entao um F5 chegaria aqui sem token e mostraria "link
+          // invalido". Voltar ao e-mail funciona - o link do GoTrue continua
+          // valido enquanto nao for consumido.
+          mostrar(
+            "erro",
+            "Falha de conexao",
+            "Nao foi possivel confirmar agora. Abra o link do e-mail novamente."
+          );
+        });
+    })();
+  </script>
 </body>
 </html>`;
 }

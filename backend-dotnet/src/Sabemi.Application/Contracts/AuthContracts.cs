@@ -10,6 +10,25 @@ public sealed record MagicLinkRequest
 }
 
 /// <summary>
+/// Aprovacao de um pedido com um token de acesso do provedor externo.
+/// </summary>
+/// <remarks>
+/// Enviado pela pagina que o GoTrue abre depois de validar o magic link. O token
+/// vem do FRAGMENTO da URL, que nunca chega ao servidor sozinho - so o navegador
+/// o ve, e e por isso que ele precisa ser reenviado por POST.
+/// </remarks>
+public sealed record SupabaseApprovalRequest
+{
+    /// <summary>Identificador publico do pedido que esta sendo pollado.</summary>
+    [JsonPropertyName("selector")]
+    public string? Selector { get; init; }
+
+    /// <summary>JWT emitido pelo GoTrue. Validado CONTRA ele, nao localmente.</summary>
+    [JsonPropertyName("access_token")]
+    public string? AccessToken { get; init; }
+}
+
+/// <summary>
 /// Resposta ao inicio do login. O <c>selector</c> e o que a aba de origem guarda
 /// para fazer o polling.
 /// </summary>

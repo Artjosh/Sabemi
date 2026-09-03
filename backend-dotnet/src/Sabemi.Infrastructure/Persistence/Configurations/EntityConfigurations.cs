@@ -240,6 +240,16 @@ public sealed class LoginRequestConfiguration : IEntityTypeConfiguration<LoginRe
             .HasConversion(EnumEmMaiusculas.Para<LoginRequestStatus>())
             .IsRequired();
 
+        // Quem valida este pedido. Gravado na LINHA e nao lido da configuracao:
+        // trocar o provedor com pedidos em voo transformaria cada um deles em
+        // algo invalidavel - ver IdentityProvider.
+        b.Property(r => r.Provedor)
+            .HasColumnName("provedor")
+            .HasMaxLength(16)
+            .HasConversion(EnumEmMaiusculas.Para<IdentityProvider>())
+            .HasDefaultValue(IdentityProvider.Local)
+            .IsRequired();
+
         b.Property(r => r.CriadoEm).HasColumnName("criado_em").IsRequired();
         b.Property(r => r.ExpiraEm).HasColumnName("expira_em").IsRequired();
 

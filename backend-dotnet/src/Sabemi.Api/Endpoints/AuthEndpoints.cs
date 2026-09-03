@@ -30,6 +30,21 @@ public static class AuthEndpoints
             .AllowAnonymous()
             .WithSummary("Alvo do link do e-mail - aprova o login em qualquer dispositivo");
 
+        // ------------------------------------------------- modo Supabase
+        //
+        // Estas duas rotas existem apenas quando AUTH_PROVIDER=supabase. No modo
+        // local elas responderiam 404 - o provedor local devolve `null` na
+        // validacao de token externo, que e o que a rota exige.
+        group.MapGet("/supabase/confirm", ConfirmarSupabase)
+            .AllowAnonymous()
+            .WithSummary("Alvo do redirect do GoTrue - le o token do fragmento e aprova");
+
+        group.MapPost("/supabase/aprovar", AprovarComTokenSupabase)
+            .AllowAnonymous()
+            .RequireRateLimiting("auth")
+            .WithSummary("Aprova o pedido com um token de acesso do GoTrue")
+            .Produces<ProblemDetailsDto>(StatusCodes.Status401Unauthorized);
+
         group.MapPost("/verify-otp", VerifyOtp)
             .AllowAnonymous()
             .RequireRateLimiting("auth")
@@ -52,6 +67,52 @@ public static class AuthEndpoints
             .Produces<ProblemDetailsDto>(StatusCodes.Status401Unauthorized);
 
         return app;
+    }
+
+    /// <summary>
+    /// Alvo do <c>redirect_to</c> que o GoTrue usa depois de validar o magic link.
+    /// </summary>
+    /// <remarks>
+    /// <b>Por que esta pagina precisa de JavaScript.</b> O GoTrue devolve o token
+    /// de acesso no FRAGMENTO da URL (<c>#access_token=…</c>), e fragmento nao e
+    /// enviado ao servidor - e essa a razao de ele ser usado para credenciais.
+    /// So o navegador o ve. Entao a pagina le o fragmento, o envia por POST, e o
+    /// servidor valida o token contra o GoTrue antes de aprovar o pedido.
+    ///
+    /// <b>Alternativa considerada.</b> O fluxo PKCE entrega o codigo na QUERY, o
+    /// que dispensaria JavaScript - mas exigiria guardar um <c>code_verifier</c>
+    /// por pedido, com mais uma coluna e mais um estado a expirar. Para um alvo de
+    /// redirect que sempre roda em um navegador, o custo nao se justifica.
+    ///
+    /// A pagina tambem apaga o fragmento da barra de enderecos ao terminar: sem
+    /// isso, o token ficaria no historico do aparelho.
+    /// </remarks>
+    private static IResult ConfirmarSupabase(string? selector)
+        => Results.Content(
+            SupabaseConfirmationPage.Render(selector ?? string.Empty),
+            "text/html; charset=utf-8");
+
+    /// <summary>
+    /// Aprova o pedido a partir do token que a pagina de confirmacao capturou.
+    /// </summary>
+    /// <remarks>
+    /// 401 para tudo que nao passa, sem distinguir "selector inexistente" de
+    /// "token invalido" ou "e-mail divergente": essa granularidade so ajudaria
+    /// quem esta sondando. A verificacao real esta em
+    /// <c>AuthService.ApproveWithProviderTokenAsync</c>.
+    /// </remarks>
+    private static async Task<IResult> AprovarComTokenSupabase(
+        SupabaseApprovalRequest request, AuthService auth, CancellationToken ct)
+    {
+        var aprovado = await auth.ApproveWithProviderTokenAsync(
+            request.Selector, request.AccessToken, ct);
+
+        return aprovado
+            ? Results.NoContent()
+            : Results.Json(
+                ProblemDetailsDto.Of(
+                    "Nao foi possivel confirmar este acesso.", "supabase_approval_failed"),
+                statusCode: StatusCodes.Status401Unauthorized);
     }
 
     private static async Task<IResult> StartLogin(
@@ -97,6 +158,14 @@ public static class AuthEndpoints
         {
             AuthFailure.NotFound => (StatusCodes.Status404NotFound, "login_request_not_found"),
             AuthFailure.TooManyAttempts => (StatusCodes.Status429TooManyRequests, "too_many_attempts"),
+
+            // 503 e nao 400: o cliente nao errou nada - o provedor de identidade
+            // esta fora do ar. Um 400 mandaria quem chama procurar erro no
+            // proprio pedido, e a UI diria "codigo incorreto" para um codigo que
+            // pode estar perfeitamente certo.
+            AuthFailure.ProviderUnavailable
+                => (StatusCodes.Status503ServiceUnavailable, "identity_provider_unavailable"),
+
             _ => (StatusCodes.Status400BadRequest, "invalid_code")
         };
 

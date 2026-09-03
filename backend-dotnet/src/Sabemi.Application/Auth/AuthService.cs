@@ -72,7 +72,19 @@ public enum AuthFailure
     TooManyAttempts,
 
     /// <summary>E-mail ausente ou malformado.</summary>
-    InvalidEmail
+    InvalidEmail,
+
+    /// <summary>
+    /// O provedor de identidade externo nao pode ser consultado.
+    /// </summary>
+    /// <remarks>
+    /// Separado de <see cref="InvalidCode"/> de proposito. Um GoTrue fora do ar
+    /// nao e um codigo errado: contar como tentativa faria uma queda de dois
+    /// segundos consumir o orcamento do usuario, e a tela precisa dizer "tente
+    /// de novo em instantes" em vez de "codigo incorreto". Vira HTTP 503, e nao
+    /// 401 - o cliente nao errou nada.
+    /// </remarks>
+    ProviderUnavailable
 }
 
 /// <summary>Resultado de um passo do login: sucesso com valor, ou motivo da falha.</summary>
@@ -113,7 +125,7 @@ public sealed class AuthService(
     IAppDbContext db,
     IClock clock,
     ITokenIssuer tokenIssuer,
-    ILoginNotificationSender notifier,
+    IIdentityProvider identityProvider,
     IOptions<AuthOptions> options,
     ILogger<AuthService> logger)
 {
@@ -135,30 +147,33 @@ public sealed class AuthService(
         // dois codigos funcionando ao mesmo tempo.
         await InvalidatePendingAsync(email, ct);
 
+        // O selector e gerado AQUI, e nao pelo provedor: ele e a peca do fluxo
+        // que nao pertence a nenhum dos dois modos. E o que sustenta o polling
+        // cross-device, e no modo Supabase e ele que viaja no `redirect_to` para
+        // ligar o clique no celular ao pedido pollado no desktop.
         var selector = GenerateToken(24);
-        var magicToken = GenerateToken(32);
-        var otpCode = GenerateOtp();
 
-        var pedido = LoginRequest.Create(
-            email, selector, Hash(magicToken), Hash(otpCode), agora, _options.MagicLinkTtl);
-
-        db.LoginRequests.Add(pedido);
-        await db.SaveChangesAsync(ct);
-
-        var magicUrl = $"{_options.PublicBaseUrl.TrimEnd('/')}/auth/confirm?token={Uri.EscapeDataString(magicToken)}";
-
-        // Uma falha no envio nao derruba a requisicao: o pedido ja existe e o
-        // usuario pode tentar de novo (e em dev os codigos voltam no corpo).
-        bool enviado;
+        // O provedor decide o resto: gerar e guardar os segredos (modo local) ou
+        // delegar tudo ao GoTrue (modo Supabase). Uma falha no envio NAO derruba
+        // a requisicao nem descarta o pedido - o selector ja vai para o cliente,
+        // que ja comeca a pollar, e um pedido ausente daria 404 com a tela
+        // dizendo "seu acesso expirou" quando o que houve foi falha de envio.
+        ChallengeResult desafio;
         try
         {
-            enviado = await notifier.SendAsync(email, magicUrl, otpCode, ct);
+            desafio = await identityProvider.StartChallengeAsync(email, selector, ct);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Falha ao enviar o e-mail de acesso para {Email}.", email);
-            enviado = false;
+            logger.LogError(ex, "Falha ao iniciar o desafio de acesso para {Email}.", email);
+
+            return AuthResult<MagicLinkStartDto>.Fail(
+                AuthFailure.ProviderUnavailable,
+                "Nao foi possivel iniciar o acesso agora. Tente novamente em instantes.");
         }
+
+        db.LoginRequests.Add(desafio.Pedido);
+        await db.SaveChangesAsync(ct);
 
         var expoe = _options.ExposeLoginCodes;
 
@@ -166,15 +181,36 @@ public sealed class AuthService(
         {
             Selector = selector,
             Email = email,
-            EmailSent = enviado,
-            DevMagicUrl = expoe ? magicUrl : null,
-            DevOtpCode = expoe ? otpCode : null,
-            Message = enviado
-                ? "Enviamos um link e um codigo de acesso para o seu e-mail."
-                : expoe
-                    ? "Use o link ou o codigo abaixo para entrar."
-                    : "Nao foi possivel enviar o e-mail agora. Tente novamente em instantes."
+            EmailSent = desafio.EmailEnviado,
+
+            // `expoe` decide se PODE mostrar; o provedor decide se TEM o que
+            // mostrar. No modo Supabase os dois vem nulos - o link vive dentro do
+            // GoTrue e nunca passa por aqui.
+            DevMagicUrl = expoe ? desafio.MagicUrl : null,
+            DevOtpCode = expoe ? desafio.OtpCode : null,
+
+            Message = MontarMensagem(desafio, expoe),
         });
+    }
+
+    /// <summary>
+    /// O texto que a tela mostra depois de pedir acesso.
+    /// </summary>
+    /// <remarks>
+    /// Os tres casos existem porque cada um manda o usuario fazer uma coisa
+    /// diferente, e errar aqui e mandá-lo esperar por algo que nao vem. O caso do
+    /// meio - envio aceito, mas sem link em maos - so acontece no modo Supabase.
+    /// </remarks>
+    private static string MontarMensagem(ChallengeResult desafio, bool expoe)
+    {
+        if (desafio.EmailEnviado)
+        {
+            return "Enviamos um link e um codigo de acesso para o seu e-mail.";
+        }
+
+        return expoe && desafio.MagicUrl is not null
+            ? "Use o link ou o codigo abaixo para entrar."
+            : "Nao foi possivel enviar o e-mail agora. Tente novamente em instantes.";
     }
 
     /// <summary>
@@ -210,6 +246,103 @@ public sealed class AuthService(
     }
 
     /// <summary>
+    /// Aprova o pedido a partir de um token de acesso do provedor externo.
+    /// </summary>
+    /// <remarks>
+    /// <b>O caminho cross-device do modo Supabase.</b> O usuario abre o e-mail no
+    /// celular; o GoTrue valida o magic link dele e redireciona para um endpoint
+    /// nosso levando o <c>selector</c> na query e o token de acesso no fragmento
+    /// da URL. Uma pagina nossa le o fragmento e chama este metodo, e o polling
+    /// que roda no desktop recebe a sessao no ciclo seguinte.
+    ///
+    /// <b>As duas verificacoes que fazem isto ser seguro.</b> O selector e
+    /// PUBLICO - ele viaja em cada chamada de polling -, entao aprovar so por ele
+    /// deixaria qualquer pessoa que observasse uma requisicao entrar na conta
+    /// alheia. Por isso:
+    ///
+    /// <list type="number">
+    /// <item>o token e validado CONTRA O PROVEDOR (nao localmente), o que tambem
+    /// recusa um token ja revogado;</item>
+    /// <item>o e-mail que o provedor devolve e comparado com o do pedido - sem
+    /// isso, um token valido de OUTRA conta aprovaria este.</item>
+    /// </list>
+    ///
+    /// Devolve <c>false</c> para tudo que nao passar. Nenhuma distincao entre
+    /// "selector inexistente", "token invalido" e "e-mail divergente chega ao
+    /// cliente: essa granularidade so ajudaria quem esta sondando.
+    /// </remarks>
+    public async Task<bool> ApproveWithProviderTokenAsync(
+        string? selector,
+        string? accessToken,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(selector) || string.IsNullOrWhiteSpace(accessToken))
+        {
+            return false;
+        }
+
+        var pedido = await db.LoginRequests.FirstOrDefaultAsync(r => r.Selector == selector, ct);
+
+        if (pedido is null)
+        {
+            return false;
+        }
+
+        if (pedido.IsExpired(clock.UtcNow))
+        {
+            db.LoginRequests.Remove(pedido);
+            await db.SaveChangesAsync(ct);
+            return false;
+        }
+
+        // Um pedido do modo LOCAL nao pode ser aprovado por token externo: ele
+        // tem o proprio magic token, e aceitar os dois caminhos daria duas formas
+        // de aprovar o mesmo pedido - uma delas nao prevista quando ele foi
+        // criado.
+        if (pedido.Provedor != identityProvider.Kind)
+        {
+            logger.LogWarning(
+                "Tentativa de aprovar por token um pedido do provedor {Provedor}.",
+                pedido.Provedor);
+
+            return false;
+        }
+
+        var emailDoToken = await identityProvider.VerifyAccessTokenAsync(accessToken, ct);
+
+        if (emailDoToken is null)
+        {
+            return false;
+        }
+
+        // A comparacao que impede um token valido de outra conta aprovar este
+        // pedido. `OrdinalIgnoreCase` porque os dois lados ja vem normalizados,
+        // mas a comparacao nao deve depender disso.
+        if (!string.Equals(emailDoToken, pedido.Email, StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogWarning(
+                "Token de acesso de {EmailDoToken} nao corresponde ao pedido de {EmailDoPedido}.",
+                emailDoToken, pedido.Email);
+
+            return false;
+        }
+
+        pedido.Approve();
+
+        // A conta e criada aqui, na confirmacao, e nao ao pedir o acesso: do
+        // contrario bastaria digitar e-mails para popular a tabela de usuarios
+        // com contas que nunca provaram posse da caixa.
+        await GetOrCreateUserAsync(pedido.Email, ct);
+        await db.SaveChangesAsync(ct);
+
+        logger.LogInformation(
+            "Login aprovado por magic link do {Provedor} para {Email}.",
+            identityProvider.Kind, pedido.Email);
+
+        return true;
+    }
+
+    /// <summary>
     /// Valida o codigo de 6 digitos e emite a sessao na hora (mesmo dispositivo).
     /// </summary>
     public async Task<AuthResult<LoginStatusDto>> VerifyOtpAsync(string? selector, string? code, CancellationToken ct = default)
@@ -237,9 +370,20 @@ public sealed class AuthService(
             return AuthResult<LoginStatusDto>.Fail(AuthFailure.TooManyAttempts, "Muitas tentativas. Solicite um novo acesso.");
         }
 
-        // Comparacao em tempo constante: comparar hashes com == vazaria, pelo
-        // tempo de resposta, quantos caracteres iniciais estao corretos.
-        if (!FixedTimeEquals(pedido.OtpCodeHash, Hash(code.Trim())))
+        // Quem valida e o provedor: comparacao de hash em tempo constante no modo
+        // local, chamada ao GoTrue no modo Supabase.
+        var verificacao = await identityProvider.VerifyOtpAsync(pedido, code, ct);
+
+        if (verificacao == OtpVerification.Indisponivel)
+        {
+            // NAO conta tentativa. Uma queda do provedor nao pode consumir o
+            // orcamento do usuario e obriga-lo a pedir um acesso novo.
+            return AuthResult<LoginStatusDto>.Fail(
+                AuthFailure.ProviderUnavailable,
+                "Nao foi possivel verificar o codigo agora. Tente novamente em instantes.");
+        }
+
+        if (verificacao == OtpVerification.Invalido)
         {
             pedido.RegisterFailedOtpAttempt();
             await db.SaveChangesAsync(ct);

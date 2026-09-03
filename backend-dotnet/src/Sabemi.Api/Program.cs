@@ -160,6 +160,16 @@ var app = builder.Build();
 // provedor de e-mail, mas nunca deve passar despercebido: se esta configuracao
 // for promovida a um ambiente real, o aviso esta no log de inicializacao. Aqui e
 // nao antes do Build(): so a partir deste ponto o logger do host esta de pe.
+// Qual provedor de IDENTIDADE esta ativo. A diferenca entre os dois modos e
+// grande - no modo supabase o link de acesso vive dentro do GoTrue e nao aparece
+// na resposta - e descobri-la lendo o log e melhor do que descobri-la pedindo
+// acesso e nao entendendo o que voltou.
+app.Logger.LogInformation(
+    "Provedor de identidade: {Provedor}.",
+    (app.Configuration["AUTH_PROVIDER"] ?? "local").ToLowerInvariant() == "supabase"
+        ? $"supabase (GoTrue em {app.Configuration["Supabase:Url"]})"
+        : "local (magic link e OTP proprios)");
+
 // Qual provedor de e-mail esta ativo. Sem esta linha, a diferenca entre "o
 // e-mail falhou" e "nunca houve provedor configurado" so apareceria depois de
 // alguem pedir acesso e nao receber nada.

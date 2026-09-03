@@ -11,6 +11,31 @@ public enum LoginRequestStatus
 }
 
 /// <summary>
+/// Quem valida a identidade de um pedido de login.
+/// </summary>
+/// <remarks>
+/// <b>Por que a escolha vive na LINHA, e nao so na configuracao.</b> Um pedido
+/// criado no modo local guarda os hashes do proprio magic token e do proprio
+/// OTP; um criado no modo Supabase nao guarda nenhum dos dois - quem valida e o
+/// GoTrue. Se a decisao fosse lida da configuracao no momento da validacao, um
+/// reinicio com o provedor trocado transformaria todo pedido em voo em algo
+/// invalidavel: o codigo local nao seria mais verificado contra o hash que
+/// existe, e o codigo do GoTrue nao existiria. Gravando o provedor, um pedido
+/// termina do mesmo jeito que comecou.
+/// </remarks>
+public enum IdentityProvider
+{
+    /// <summary>Magic link e OTP proprios, com hash SHA-256 nesta tabela.</summary>
+    Local,
+
+    /// <summary>
+    /// Magic link e OTP do GoTrue (Supabase Auth). Esta tabela guarda apenas o
+    /// selector, que e o que sustenta o polling cross-device.
+    /// </summary>
+    Supabase
+}
+
+/// <summary>
 /// Pedido de login passwordless com confirmacao cross-device por polling.
 /// </summary>
 /// <remarks>
@@ -32,6 +57,13 @@ public enum LoginRequestStatus
 /// O pedido e de uso unico: aprovado e trocado por sessao, e destruido. Um
 /// segundo polling com o mesmo selector recebe 404, que o cliente le como
 /// "pare de perguntar".
+///
+/// <para><b>No modo Supabase</b> (<see cref="IdentityProvider.Supabase"/>) os
+/// dois hashes ficam nulos: o magic link e o OTP sao emitidos e validados pelo
+/// GoTrue. O que continua aqui e o <see cref="Selector"/> - e ele que sustenta o
+/// polling, porque o GoTrue nao tem esse conceito. E dessa divisao que sai o
+/// melhor dos dois: a identidade e verificada por um servico dedicado, e o
+/// cross-device continua funcionando.</para>
 /// </remarks>
 public class LoginRequest
 {
@@ -56,8 +88,14 @@ public class LoginRequest
 
     public DateTimeOffset ExpiraEm { get; private set; }
 
+    /// <summary>Quem valida este pedido. Ver <see cref="IdentityProvider"/>.</summary>
+    public IdentityProvider Provedor { get; private set; } = IdentityProvider.Local;
+
     private LoginRequest() { }
 
+    /// <summary>
+    /// Pedido validado por nos: os dois segredos ficam aqui, como hash.
+    /// </summary>
     public static LoginRequest Create(
         string email,
         string selector,
@@ -71,6 +109,34 @@ public class LoginRequest
             Selector = selector,
             MagicTokenHash = magicTokenHash,
             OtpCodeHash = otpCodeHash,
+            Provedor = IdentityProvider.Local,
+            CriadoEm = agora,
+            ExpiraEm = agora.Add(ttl)
+        };
+
+    /// <summary>
+    /// Pedido validado pelo GoTrue: guarda apenas o selector.
+    /// </summary>
+    /// <remarks>
+    /// Sem <c>magicTokenHash</c> e sem <c>otpCodeHash</c> - e isso e a razao de
+    /// existir uma segunda fabrica em vez de parametros opcionais na primeira.
+    /// Com parametros opcionais, esquecer de passar os hashes no modo local
+    /// criaria em silencio um pedido que nenhum codigo consegue aprovar. Aqui as
+    /// duas formas validas de um pedido sao explicitas, e o compilador nao deixa
+    /// confundi-las.
+    /// </remarks>
+    public static LoginRequest CreateDelegado(
+        string email,
+        string selector,
+        DateTimeOffset agora,
+        TimeSpan ttl)
+        => new()
+        {
+            Email = email,
+            Selector = selector,
+            MagicTokenHash = null,
+            OtpCodeHash = null,
+            Provedor = IdentityProvider.Supabase,
             CriadoEm = agora,
             ExpiraEm = agora.Add(ttl)
         };

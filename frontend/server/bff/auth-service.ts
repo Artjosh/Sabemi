@@ -4,6 +4,7 @@ import { bffConfig } from "./config";
 import { uuidV7 } from "./ids";
 import { prisma } from "./db";
 import { enviarEmailDeAcesso } from "./brevo";
+import { identityProvider } from "./identity";
 import {
   fixedTimeEquals,
   generateOtp,
@@ -33,7 +34,21 @@ import {
  * o timeout.
  */
 
-export type AuthFailure = "not_found" | "invalid_code" | "too_many_attempts" | "invalid_email";
+/**
+ * Motivos pelos quais um passo do login pode falhar.
+ *
+ * `provider_unavailable` e separado de `invalid_code` de proposito: um GoTrue
+ * fora do ar nao e um codigo errado. Contar como tentativa faria uma queda de
+ * dois segundos consumir o orcamento do usuario, e a tela precisa dizer "tente
+ * de novo em instantes" em vez de "codigo incorreto". Vira HTTP 503, e nao 401 -
+ * o cliente nao errou nada.
+ */
+export type AuthFailure =
+  | "not_found"
+  | "invalid_code"
+  | "too_many_attempts"
+  | "invalid_email"
+  | "provider_unavailable";
 
 export type AuthResult<T> =
   | { ok: true; value: T }
@@ -75,48 +90,47 @@ export async function startLogin(rawEmail: unknown): Promise<AuthResult<MagicLin
   // funcionando ao mesmo tempo.
   await prisma.loginRequest.deleteMany({ where: { email } });
 
+  // O selector e gerado AQUI, e nao pelo provedor: ele e a peca do fluxo que nao
+  // pertence a nenhum dos dois modos. E o que sustenta o polling cross-device, e
+  // no modo Supabase e ele que viaja no `redirect_to` para ligar o clique no
+  // celular ao pedido pollado no desktop.
   const selector = generateToken(24);
-  const magicToken = generateToken(32);
-  const otpCode = generateOtp();
+
+  // O provedor decide o resto: gerar e guardar os segredos (modo local) ou
+  // delegar tudo ao GoTrue (modo Supabase).
+  let desafio;
+  try {
+    desafio = await identityProvider.iniciarDesafio(email, selector);
+  } catch (erro) {
+    console.error(`[bff-auth] falha ao iniciar o desafio de acesso para ${email}:`, erro);
+    return fail(
+      "provider_unavailable",
+      "Nao foi possivel iniciar o acesso agora. Tente novamente em instantes.",
+    );
+  }
 
   // Os valores que antes vinham de `@default(...)` agora sao explicitos: com o
   // schema compartilhado, quem os define e a aplicacao (o EF Core sempre fez
   // assim). Ter duas fontes de valor para a mesma coluna seria pedir
   // divergencia entre os dois backends.
+  //
+  // O pedido e gravado MESMO se o desafio falhou: o selector ja vai para o
+  // cliente, que ja comeca a pollar, e um pedido ausente daria 404 com a tela
+  // dizendo "seu acesso expirou" quando o que houve foi falha de envio.
   await prisma.loginRequest.create({
     data: {
       id: uuidV7(),
       email,
       selector,
-      magicTokenHash: sha256(magicToken),
-      otpCodeHash: sha256(otpCode),
+      magicTokenHash: desafio.magicTokenHash,
+      otpCodeHash: desafio.otpCodeHash,
       otpTentativas: 0,
       status: "PENDENTE",
+      provedor: identityProvider.kind,
       criadoEm: agora,
       expiraEm: new Date(agora.getTime() + bffConfig.auth.magicLinkTtlMs),
     },
   });
-
-  const base = bffConfig.auth.publicBaseUrl.replace(/\/$/, "");
-  const magicUrl = `${base}/api/bff/auth/confirm?token=${encodeURIComponent(magicToken)}`;
-
-  // O link vai para o log SEMPRE, inclusive quando o e-mail e enviado de
-  // verdade. Custa nada e e a diferenca entre um suporte de dois minutos e um de
-  // meia hora quando alguem diz "nao recebi".
-  console.info(`[bff-auth] ACESSO ${email} | link: ${magicUrl} | OTP: ${otpCode}`);
-
-  // O envio e AGUARDADO, e nao disparado em segundo plano.
-  //
-  // Sem esperar, `email_sent` seria um chute e a tela nao teria como escolher
-  // entre "confira seu e-mail" e "use o codigo abaixo". Uma promessa errada aqui
-  // manda o usuario procurar um e-mail que nunca vai chegar - e o timeout curto
-  // (10s) existe justamente para que essa espera tenha teto.
-  //
-  // Uma falha NAO invalida o pedido: ele continua no banco, o polling continua
-  // funcionando, e o link esta no log.
-  const emailEnviado = bffConfig.brevo.apiKey
-    ? await enviarEmailDeAcesso(email, magicUrl, otpCode)
-    : false;
 
   const expoe = bffConfig.auth.exposeLoginCodes;
 
@@ -125,19 +139,40 @@ export async function startLogin(rawEmail: unknown): Promise<AuthResult<MagicLin
     value: {
       selector,
       email,
-      email_sent: emailEnviado,
-      dev_magic_url: expoe ? magicUrl : null,
-      dev_otp_code: expoe ? otpCode : null,
-      // Os textos sao os MESMOS do backend .NET (AuthService.StartAsync): a tela
-      // de login e uma so, e a mensagem nao deveria mudar conforme o backend
-      // selecionado.
-      message: emailEnviado
-        ? "Enviamos um link e um codigo de acesso para o seu e-mail."
-        : expoe
-          ? "Use o link ou o codigo abaixo para entrar."
-          : "Nao foi possivel enviar o e-mail agora. Tente novamente em instantes.",
+      email_sent: desafio.emailEnviado,
+
+      // `expoe` decide se PODE mostrar; o provedor decide se TEM o que mostrar.
+      // No modo Supabase os dois vem nulos - o link vive dentro do GoTrue e
+      // nunca passa por aqui.
+      dev_magic_url: expoe ? desafio.magicUrl : null,
+      dev_otp_code: expoe ? desafio.otpCode : null,
+      // Os textos sao os MESMOS do backend .NET (AuthService.MontarMensagem): a
+      // tela de login e uma so, e a mensagem nao deveria mudar conforme o
+      // backend selecionado.
+      message: montarMensagem(desafio.emailEnviado, desafio.magicUrl, expoe),
     },
   };
+}
+
+/**
+ * O texto que a tela mostra depois de pedir acesso.
+ *
+ * Os tres casos existem porque cada um manda o usuario fazer uma coisa
+ * diferente, e errar aqui e manda-lo esperar por algo que nao vem. O caso do
+ * meio - envio aceito, mas sem link em maos - so acontece no modo Supabase.
+ */
+function montarMensagem(
+  emailEnviado: boolean,
+  magicUrl: string | null,
+  expoe: boolean,
+): string {
+  if (emailEnviado) {
+    return "Enviamos um link e um codigo de acesso para o seu e-mail.";
+  }
+
+  return expoe && magicUrl !== null
+    ? "Use o link ou o codigo abaixo para entrar."
+    : "Nao foi possivel enviar o e-mail agora. Tente novamente em instantes.";
 }
 
 /**
@@ -194,7 +229,24 @@ export async function verifyOtp(
     return fail("too_many_attempts", "Muitas tentativas. Solicite um novo acesso.");
   }
 
-  if (!pedido.otpCodeHash || !fixedTimeEquals(pedido.otpCodeHash, sha256(code.trim()))) {
+  // Quem valida e o provedor: comparacao de hash em tempo constante no modo
+  // local, chamada ao GoTrue no modo Supabase.
+  const verificacao = await identityProvider.verificarOtp(
+    pedido.email,
+    pedido.otpCodeHash,
+    code.trim(),
+  );
+
+  if (verificacao === "indisponivel") {
+    // NAO conta tentativa. Uma queda do provedor nao pode consumir o orcamento
+    // do usuario e obriga-lo a pedir um acesso novo.
+    return fail(
+      "provider_unavailable",
+      "Nao foi possivel verificar o codigo agora. Tente novamente em instantes.",
+    );
+  }
+
+  if (verificacao === "invalido") {
     await prisma.loginRequest.update({
       where: { id: pedido.id },
       data: { otpTentativas: { increment: 1 } },
@@ -209,6 +261,81 @@ export async function verifyOtp(
   await prisma.loginRequest.delete({ where: { id: pedido.id } });
 
   return { ok: true, value: sessao };
+}
+
+/**
+ * Aprova o pedido a partir de um token de acesso do provedor externo.
+ *
+ * <b>Espelho de `AuthService.ApproveWithProviderTokenAsync`.</b> E o caminho
+ * cross-device do modo Supabase: o usuario abre o e-mail no celular, o GoTrue
+ * valida o magic link dele e redireciona para uma pagina nossa levando o
+ * `selector` na query e o token no fragmento da URL. A pagina le o fragmento e
+ * chama isto, e o polling que roda no desktop recebe a sessao no ciclo seguinte.
+ *
+ * <b>As duas verificacoes que fazem isto ser seguro.</b> O selector e PUBLICO -
+ * ele viaja em cada chamada de polling -, entao aprovar so por ele deixaria
+ * qualquer pessoa que observasse uma requisicao entrar na conta alheia. Por isso:
+ *
+ *   1. o token e validado CONTRA O PROVEDOR (nao localmente), o que tambem
+ *      recusa um token ja revogado;
+ *   2. o e-mail que o provedor devolve e comparado com o do pedido - sem isso,
+ *      um token valido de OUTRA conta aprovaria este.
+ *
+ * Devolve `false` para tudo que nao passar. Nenhuma distincao entre "selector
+ * inexistente", "token invalido" e "e-mail divergente" chega ao cliente: essa
+ * granularidade so ajudaria quem esta sondando.
+ */
+export async function aprovarComTokenDoProvedor(
+  selector: unknown,
+  accessToken: unknown,
+): Promise<boolean> {
+  if (typeof selector !== "string" || !selector) return false;
+  if (typeof accessToken !== "string" || !accessToken) return false;
+
+  const pedido = await prisma.loginRequest.findUnique({ where: { selector } });
+  if (!pedido) return false;
+
+  if (pedido.expiraEm.getTime() < Date.now()) {
+    await prisma.loginRequest.delete({ where: { id: pedido.id } });
+    return false;
+  }
+
+  // Um pedido do modo LOCAL nao pode ser aprovado por token externo: ele tem o
+  // proprio magic token, e aceitar os dois caminhos daria duas formas de aprovar
+  // o mesmo pedido - uma delas nao prevista quando ele foi criado.
+  if (pedido.provedor !== identityProvider.kind) {
+    console.warn(
+      `[bff-auth] tentativa de aprovar por token um pedido do provedor ${pedido.provedor}`,
+    );
+    return false;
+  }
+
+  const emailDoToken = await identityProvider.verificarTokenDeAcesso(accessToken);
+  if (emailDoToken === null) return false;
+
+  // A comparacao que impede um token valido de outra conta aprovar este pedido.
+  if (emailDoToken.toLowerCase() !== pedido.email.toLowerCase()) {
+    console.warn(
+      `[bff-auth] token de ${emailDoToken} nao corresponde ao pedido de ${pedido.email}`,
+    );
+    return false;
+  }
+
+  // A conta e criada aqui, na confirmacao, e nao ao pedir o acesso: do contrario
+  // bastaria digitar e-mails para popular a tabela de usuarios com contas que
+  // nunca provaram posse da caixa.
+  await getOrCreateUser(pedido.email);
+
+  await prisma.loginRequest.update({
+    where: { id: pedido.id },
+    data: { status: "APROVADO" },
+  });
+
+  console.info(
+    `[bff-auth] login aprovado por magic link do ${identityProvider.kind} para ${pedido.email}`,
+  );
+
+  return true;
 }
 
 /**
