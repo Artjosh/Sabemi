@@ -39,12 +39,14 @@ aqui são os únicos que atravessam a **fiação real**.
 | --- | --- |
 | `auth-cross-device.e2e.test.ts` | O desktop entra sozinho depois que **outro cliente HTTP** abre o link. Dois cookie jars separados — é a única forma honesta de provar "cross-device". |
 | `webhook-pipeline.e2e.test.ts` | Da entrega do parceiro ao contrato consolidado, com o trabalho **enfileirado por um processo e concluído por outro**. Roda contra os dois backends. |
-| `backend-switch.e2e.test.ts` | A troca muda os **dados**, não só a rota: um evento gravado em um backend devolve `404` no outro. E os dois cumprem o mesmo contrato, campo a campo. |
+| `backend-switch.e2e.test.ts` | A troca **preserva** dados e sessão: um evento entregue a um backend aparece no painel do outro, e uma reentrega no .NET reconhece como duplicata algo que entrou pelo VINEXT. Os dois cumprem o mesmo contrato, campo a campo — incluindo o reenfileiramento e o diagnóstico de falha. |
 
-Três exemplos do que só este nível pega:
+São **50 testes**. Três exemplos do que só este nível pega:
 
 - **Fiação entre containers.** Um serviço apontando para `localhost` em vez do
-  nome do container passaria em todos os outros testes.
+  nome do container passaria em todos os outros testes. Aconteceu de verdade duas
+  vezes neste projeto: no healthcheck (que resolvia para IPv6) e na URL do
+  GoTrue (onde `localhost:54321` dentro do container não é o Kong).
 - **Migrations no entrypoint.** Se o schema não fosse criado na subida, tudo
   compilaria e nada funcionaria.
 - **O worker de outro processo.** Os testes de integração chamam o ciclo de

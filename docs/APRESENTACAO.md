@@ -53,16 +53,29 @@ ativa.
                     │                            │
                     ▼                            ▼
             ┌───────────────────────────────────────┐
-            │            PostgreSQL                 │
-            │   schema dotnet  │   schema vinext    │
-            │   (EF Core)      │   (Prisma)         │
+            │      PostgreSQL (Supabase local)      │
+            │                                       │
+            │        schema `sabemi` — UM só        │
+            │   EF Core migra · Prisma descreve     │
             └───────────────────────────────────────┘
 
    Banco parceiro ──▶ POST /webhooks/pagamento          (.NET)
                   ──▶ POST /api/bff/webhooks/pagamento  (VINEXT)
 ```
 
-Quatro containers: `postgres`, `api`, `worker`, `frontend`.
+Quatro containers: `postgres`, `api`, `worker`, `frontend`. Dois overlays
+opcionais: `docker-compose.supabase.yml` (plataforma Supabase completa —
+GoTrue, Kong, PostgREST, Studio) e o profile `observabilidade` (Jaeger).
+
+**O schema é um só, e é isso que faz a troca de backend valer a pena.** Um
+evento entregue a um backend aparece no painel do outro; uma reentrega no .NET
+reconhece como duplicata algo que entrou pelo VINEXT; e trocar de backend não
+pede novo login, porque a tabela de usuários também é compartilhada.
+
+O preço dessa escolha é que duas ferramentas de migration não podem disputar as
+mesmas tabelas. **O EF Core é o dono**; o Prisma apenas descreve o mesmo modelo
+para poder consultar. O que mantém a descrição honesta é um passo de CI que
+compara os dois (`prisma migrate diff`) e falha se divergirem.
 
 ---
 
@@ -161,18 +174,71 @@ algum.
 O requisito real é demonstrar **ORM com migrations**. A solução adotada não
 descarta o Prisma; **coloca cada ORM onde ele é a escolha natural**:
 
-| Backend | ORM         | Schema   | Migrations                |
-| ------- | ----------- | -------- | ------------------------- |
-| .NET    | EF Core 10  | `dotnet` | `dotnet ef migrations`    |
-| VINEXT  | Prisma 7    | `vinext` | `prisma migrate`          |
+| Backend | ORM         | Papel no schema `sabemi`               |
+| ------- | ----------- | -------------------------------------- |
+| .NET    | EF Core 10  | **Dono**: cria e evolui (`dotnet ef`)  |
+| VINEXT  | Prisma 7    | **Descreve**: consulta e grava         |
 
-**Schemas separados na mesma instância.** É o que permite dois ORMs coexistirem
-sem que o `migrate` de um enxergue o schema do outro como deriva a corrigir. E
-reproduz a regra de que cada serviço é dono dos seus dados.
+### Um schema só, e um dono só
 
-Consequência visível: **trocar de backend troca também o conjunto de dados**.
-Isso é intencional e o painel avisa qual backend está ativo. É o que mantém a
-troca honesta — são dois sistemas, não duas fachadas sobre o mesmo banco.
+Uma versão anterior deste projeto usava **schemas separados** (`dotnet` e
+`vinext`), com o argumento de que assim cada ORM podia migrar o seu sem enxergar
+o do outro como deriva. O argumento era bom; o resultado, não.
+
+Com dois schemas, trocar de backend trocava também o conjunto de dados: um evento
+entregue a um devolvia `404` no outro, e o operador precisava fazer login de novo
+porque a tabela de usuários era outra. Para um painel de conciliação, isso não é
+uma demonstração de independência — é um sistema que perde dados de vista.
+
+Hoje **o schema é um só**. O que isso compra:
+
+- um evento entregue a um backend aparece no painel do outro;
+- uma reentrega no .NET reconhece como duplicata algo que entrou pelo VINEXT — a
+  idempotência vale para o sistema, não para cada metade;
+- trocar de backend não pede novo login.
+
+E o preço é real: duas ferramentas de migration **não podem** disputar as mesmas
+tabelas. Cada uma acharia que é a dona, e a última a rodar venceria.
+
+### Como a divisão é mantida honesta
+
+O EF Core migra. O Prisma tem um `schema.prisma` que **descreve** o mesmo modelo —
+sem pasta de migrations, sem `prisma migrate deploy` em lugar nenhum.
+
+Uma descrição que ninguém verifica envelhece em silêncio, e o sintoma seria o pior
+possível: o backend VINEXT lendo colunas que não existem, com o erro aparecendo em
+runtime, longe da causa. Por isso o CI roda `prisma migrate diff` e **falha se os
+dois divergirem**.
+
+O mesmo passo está no script de migração, que serve local e remoto:
+
+```bash
+node scripts/migrar.mjs          # aplica as migrations e confere o Prisma
+node scripts/migrar.mjs --verificar   # só confere
+```
+
+Ele usa o SDK do .NET quando existe e cai para `backend-dotnet/schema.sql` —
+gerado por `dotnet ef migrations script --idempotent`, versionado, e verificado no
+CI — quando não existe. Assim quem trabalha no frontend não precisa instalar o SDK
+para preparar um banco.
+
+### O bug que a unificação criou, e que só um teste pegou
+
+Ao passar a compartilhar tabelas, os dois ORMs começaram a gravar os mesmos enums
+com **grafias diferentes**: o EF Core escrevia o nome do membro em C# (`Sucesso`),
+o Prisma escrevia o valor do contrato da API (`SUCESSO`).
+
+Nada dava erro. As consultas funcionavam e devolviam **menos linhas do que
+deviam** — um filtro por situação no .NET não encontrava os eventos processados
+pelo VINEXT, e os contadores somavam cada grafia em separado. É o pior tipo de
+falha em um painel de conciliação: silenciosa e plausível.
+
+A correção foi adotar MAIÚSCULAS como grafia canônica (a mesma do contrato
+público), com um conversor no mapeamento e uma migration normalizando o que já
+estava gravado. E ela expôs um segundo: o SQL bruto da fila comparava com o
+literal `'Pendente'` e **parou de reivindicar itens** — de novo sem erro, só
+trabalho que nunca acontecia. Hoje os literais derivam do enum, então uma
+renomeação futura quebra o build em vez de silenciar a fila.
 
 ---
 
@@ -373,15 +439,23 @@ cookie de seleção e despacha.
 > Verificado por teste: nenhuma chamada do cliente monta URL absoluta. Introduzir
 > um `http://localhost:8080` ali quebra a suíte.
 
-### Por que a troca encerra a sessão
+### Por que a troca NÃO encerra a sessão
 
-Cada backend tem o próprio banco e, portanto, os próprios usuários. O `sub` do
-JWT aponta para um identificador que o outro backend não conhece. Manter o cookie
-produziria uma sessão que *parece* válida e falha na primeira consulta, com um
-`401` sem explicação.
+Numa versão anterior ela encerrava, e havia uma razão: cada backend tinha o
+próprio schema e, portanto, os próprios usuários. O `sub` do JWT apontava para um
+identificador que o outro backend não conhecia, e manter o cookie produziria uma
+sessão que *parece* válida e falha na primeira consulta, com um `401` sem
+explicação. A interface avisava antes e pedia confirmação.
 
-A interface **avisa antes** de trocar e pede confirmação. A consequência fica
-legível em vez de ser descoberta por acidente.
+Com o schema compartilhado, a causa desapareceu: a tabela `users` é a mesma, o
+`sub` resolve nos dois lados, e o `JWT_SECRET` também é o mesmo — é isso que
+permite ao gateway aceitar uma sessão emitida por qualquer um deles. A troca
+virou o que sempre deveria ter sido: um clique, sem diálogo e sem perder o
+contexto.
+
+Vale registrar o que a mudança tirou junto: o diálogo de confirmação era uma
+funcionalidade *desculpando* uma limitação. Quando a limitação sai, a
+funcionalidade sai com ela.
 
 ### Como se prova que a troca é real
 
@@ -444,7 +518,297 @@ distingue verde de vermelho.
 
 ---
 
-## 12. Containerização
+## 12. Falha, retentativa e reenfileiramento
+
+### O problema com "tentar três vezes"
+
+A primeira versão tratava toda falha igual: reagendar com backoff até esgotar as
+tentativas. Isso é errado nas duas pontas.
+
+Um evento cujo contrato não existe **nunca** vai passar. Insistir três vezes só
+atrasa em minutos a única coisa útil — o evento aparecer no painel como `ERRO`,
+com a causa legível e um caminho de correção. E, do outro lado, uma
+indisponibilidade de dois segundos do banco não deveria consumir tentativa
+nenhuma.
+
+### A classificação
+
+`FailureClassifier` lê a exceção e devolve três coisas: a **categoria**
+(`TRANSITORIA`, `PERMANENTE`, `DESCONHECIDA`), um **código estável**
+(`DEADLOCK`, `REFERENCIA_INEXISTENTE`, `POOL_ESGOTADO`…) e a decisão de retentar.
+
+A ordem de leitura importa: primeiro o `SQLSTATE` do PostgreSQL ou o código do
+Prisma, depois o tipo da exceção, e só então o texto da mensagem. O texto muda
+entre versões do banco e entre *locales* do servidor; o código não.
+
+**O padrão é retentar.** Uma causa não reconhecida cai em `DESCONHECIDA`, que é
+retentável. Errar retentando custa uma espera; errar desistindo custa um
+pagamento que nunca consolidou.
+
+### O código é persistido, a explicação não
+
+A tabela guarda `erro_categoria` e `erro_codigo`. A explicação em português e a
+ação sugerida são derivadas do código **na hora da consulta**, a partir de um
+catálogo em memória.
+
+Isso tem uma consequência prática: melhorar a redação de um tooltip é um deploy,
+e não uma migration com `UPDATE` em massa — e eventos antigos passam a mostrar o
+texto novo.
+
+### O catálogo é duplicado, e isso é deliberado
+
+Existem dois: `FailureCatalog.cs` e `failure-catalog.ts`. Compartilhá-los exigiria
+um pacote comum consumido por .NET e por TypeScript — uma dependência de build
+entre dois backends que existem justamente para serem independentes.
+
+A duplicação só é defensável enquanto houver algo verificando que ela não
+divergiu. Há: um teste do frontend **lê o arquivo C#** e compara códigos e
+categorias. Se alguém acrescentar uma causa de um lado só, o build quebra.
+
+### O botão de reenfileirar
+
+Retry automático cobre o que melhora com o tempo. Mas "permanente" quer dizer
+"não passa sozinha", não "não passa nunca": o contrato que faltava pode ser
+cadastrado. Sem um caminho manual, a única saída seria reenviar o webhook com
+outro `id_transacao` — sujando o log de eventos com uma linha duplicada de um
+pagamento que é o mesmo.
+
+`POST /payments/{id}/reenfileirar` devolve o evento à fila. Três decisões:
+
+- **Recusa evento em `SUCESSO`.** A idempotência da ingestão impede um evento
+  *duplicado* de entrar; ela **não** impede o *mesmo* evento de ser processado
+  duas vezes. Sem essa recusa, dois cliques dobrariam o valor liquidado do
+  contrato. É a proteção mais importante do endpoint, e tem teste nos dois
+  backends.
+- **Zera as tentativas.** Um item que falhou esgotou o orçamento; devolvê-lo sem
+  zerar faria o botão parecer não funcionar.
+- **Não apaga o erro anterior.** Ele é sobrescrito no próximo desfecho. Apagá-lo
+  no clique destruiria o único registro do que aconteceu, justo enquanto alguém
+  investiga.
+
+Responde `409` — e não `400` — quando o estado não permite: o pedido está
+correto, o que impede é o estado do evento. E a mensagem do `409` é escrita para
+ser mostrada ao operador tal como vem.
+
+### O tooltip
+
+A célula de erro mostrava a mensagem crua da exceção, truncada em 16rem — algo
+como `23503: insert or update on table "contract_statuses" violates foreign key`
+cortado no meio. Para quem opera a conciliação, isso não diz nem o que aconteceu
+nem o que fazer.
+
+Hoje ela mostra a leitura da falha — "Falha temporária" ou "Falha definitiva" — e
+o tooltip traz a explicação, a ação sugerida e o código. A mensagem técnica
+continua a um clique, no detalhe do evento, que é onde ela serve.
+
+O gatilho é um `<button>`, e não um `<span>` com `title`: só um elemento focável
+abre o tooltip pelo teclado e pelo toque.
+
+---
+
+## 13. Observabilidade
+
+### Métricas
+
+OpenTelemetry nos três serviços, exportadas no formato Prometheus:
+
+| Serviço      | Endereço                          |
+| ------------ | --------------------------------- |
+| API .NET     | `http://localhost:8080/metrics`   |
+| Worker .NET  | `http://localhost:9464/metrics`   |
+| BFF VINEXT   | `http://localhost:9465/metrics`   |
+
+Os instrumentos de domínio vivem na camada de aplicação e usam apenas
+`System.Diagnostics` — nada de OpenTelemetry. Quem emite a medição é a camada que
+conhece o significado dela; quem decide para onde exportar é o host. Trocar OTLP
+por outra coisa não toca em uma linha da aplicação, e os testes rodam sem
+exportador algum.
+
+As métricas que importam:
+
+- `sabemi_webhook_duration_seconds` — **prova o requisito central da task**. Se
+  essa distribuição sair dos milissegundos, a regra pesada voltou para dentro do
+  request.
+- `sabemi_webhook_events_total{desfecho}` — separar `duplicado` de `aceito` torna
+  a idempotência observável: uma subida de duplicados significa que o parceiro
+  está reentregando.
+- `sabemi_processing_failures_total{codigo,categoria}` — responde, em plantão, a
+  única pergunta que importa nos primeiros segundos: *isso vai se resolver
+  sozinho?*
+- `sabemi_processing_items_total` — uma fila que parou de drenar não aparece em
+  lugar nenhum: o webhook continua respondendo `202`, os eventos continuam
+  entrando, e ninguém percebe até um contrato aparecer sem o pagamento.
+
+**Nenhum rótulo carrega `id_transacao`.** Uma série temporal por transação
+derrubaria o Prometheus em poucas horas. Esse nível de detalhe pertence ao span,
+onde é barato.
+
+### Um erro que a métrica quase escondeu
+
+Os histogramas gravam **segundos**, e os buckets padrão do SDK são pensados para
+**milissegundos** (0, 5, 10, 25 … 10000). Toda medição real caía no primeiro
+bucket, e o p95 do webhook aparecia como "≤ 5" — cinco segundos. O número existia,
+o painel renderizava, e não dizia nada. Corrigido com buckets explícitos nos dois
+backends.
+
+O equivalente no BFF foi mais sutil: `metrics.getMeter()` resolve o provedor **na
+hora da chamada** e devolve o objeto concreto — diferente de `trace.getTracer()`,
+que devolve um proxy. Como o módulo era importado antes do SDK subir, os
+instrumentos ficavam presos ao *meter* no-op para sempre. O `/metrics` respondia,
+e nunca mostrava uma métrica `sabemi_`.
+
+### Tracing
+
+Spans por OTLP, ligados apenas quando `OTEL_EXPORTER_OTLP_ENDPOINT` está
+configurado — a stack sobe normalmente sem coletor. O Jaeger vem sob um profile:
+
+```bash
+docker compose --profile observabilidade up -d
+# e no .env:  OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+```
+
+Use `4318` (OTLP/HTTP), e não `4317` (gRPC): o .NET aceita os dois, mas o
+exportador do BFF só fala HTTP — e apontar para a porta errada faz os traces do
+VINEXT sumirem em silêncio.
+
+---
+
+## 14. E-mail e provedor de identidade
+
+### Brevo, a mesma conta nos dois backends
+
+O e-mail de acesso é o mesmo produto, venha de qual backend vier: mesmo
+remetente, mesmo domínio verificado, mesma reputação de envio. Duas contas dariam
+duas reputações a cuidar e um remetente que muda conforme quem atendeu — o tipo
+de inconsistência que faz um provedor marcar a mensagem como suspeita.
+
+O que **não** é compartilhado é o código do cliente: um é C#, o outro TypeScript.
+O que os mantém equivalentes é a API (v3, mesmo endpoint, mesmo corpo) e o
+conteúdo — e o conteúdo é **código**, não um template no painel da Brevo. Um
+template remoto não entra em revisão nem no histórico do repositório, e trocar de
+provedor exigiria recriá-lo. Um teste de paridade compara os dois.
+
+API HTTP e não SMTP: a API dá erro imediato e legível ("remetente não
+verificado", "chave inválida"), enquanto por SMTP a mesma falha chega como um
+`550` genérico ou, pior, como um aceite seguido de descarte silencioso. Num fluxo
+em que o usuário está parado na tela esperando o código, saber na hora que o
+envio falhou é o que permite mostrar uma alternativa.
+
+**Uma falha de e-mail nunca vira `500` no login.** Ela vira `email_sent: false`,
+o pedido de acesso continua válido no banco, e o link segue no log.
+
+### GoTrue como modo de autenticação
+
+`AUTH_PROVIDER=supabase` delega ao GoTrue a emissão do magic link, a geração do
+OTP, o envio do e-mail e a validação do código.
+
+**O que continua local é o pedido de login com `selector`** — e é ele que sustenta
+o polling cross-device, que o GoTrue não tem: ele emite um link e espera o clique
+redirecionar o *mesmo* navegador. A divisão é o que permite ter os dois: a
+identidade verificada por um serviço dedicado, e o cross-device funcionando.
+
+```
+  desktop                     GoTrue                    celular
+     │                           │                         │
+     ├─ pede acesso ────────────▶│                         │
+     │   (selector local)        ├─ envia magic link ─────▶│
+     │                           │                         │
+     ├─ polling: pending         │      abre o link ───────┤
+     │                           │◀────────────────────────┤
+     │                           ├─ 303 para /auth/supabase/confirm
+     │                           │     ?selector=…#access_token=…
+     │                           │                         │
+     │                    a página lê o FRAGMENTO e faz POST
+     │                           │                         │
+     ├─ polling: approved ◀──────┴─ pedido aprovado ───────┘
+     │   + sessão
+```
+
+**A parte que não pode ser simplificada.** O `selector` é público — ele viaja em
+cada chamada de polling. Aprovar o pedido só com ele deixaria qualquer pessoa que
+observasse uma requisição entrar na conta alheia. Então o que aprova é o **token
+que o GoTrue emitiu**, com duas verificações:
+
+1. o token é validado **contra o GoTrue** (`GET /auth/v1/user`), e não pela
+   assinatura local — validação local aceitaria um token já revogado;
+2. o e-mail que ele devolve é comparado com o do pedido, senão um token válido de
+   *outra* conta aprovaria este.
+
+Verificado na stack real: um token legítimo de outra conta recebe `401` e o
+pedido continua pendente.
+
+**Por que a página precisa de JavaScript.** O GoTrue devolve o token no
+*fragmento* da URL (`#access_token=…`), e fragmento não é enviado ao servidor —
+é exatamente por isso que ele é usado para credenciais. Só o navegador o vê. A
+página lê o fragmento, o envia por POST, e o apaga da barra de endereços com
+`history.replaceState`, para o token não ficar no histórico do aparelho.
+
+O fluxo PKCE entregaria o código na *query* e dispensaria JavaScript, mas exigiria
+guardar um `code_verifier` por pedido — mais uma coluna e mais um estado a
+expirar, para um alvo de redirect que sempre roda em um navegador.
+
+### Como verificar o ciclo completo sem SMTP
+
+O magic link do GoTrue vai por e-mail, e sem SMTP configurado ele não sai. Para
+exercitar o fluxo inteiro mesmo assim, a API administrativa do GoTrue gera o link
+em claro — é o caminho que os testes manuais usaram.
+
+```bash
+SERVICE_KEY=$(grep '^SUPABASE_SERVICE_ROLE_KEY=' .env | cut -d= -f2-)
+
+# 1. Peça o acesso e guarde o selector
+SEL=$(curl -s -X POST http://localhost:8080/auth/magic-link \
+  -H 'Content-Type: application/json' -d '{"email":"teste@sabemi.com.br"}' \
+  | python -c "import sys,json;print(json.load(sys.stdin)['selector'])")
+
+# 2. Gere o link, apontando o redirect para o nosso endpoint com o selector
+LINK=$(curl -s -X POST http://localhost:54321/auth/v1/admin/generate_link \
+  -H "apikey: $SERVICE_KEY" -H "Authorization: Bearer $SERVICE_KEY" \
+  -H 'Content-Type: application/json' \
+  -d "{\\"type\\":\\"magiclink\\",\\"email\\":\\"teste@sabemi.com.br\\",\\"redirect_to\\":\\"http://localhost:8080/auth/supabase/confirm?selector=$SEL\\"}" \
+  | python -c "import sys,json;print(json.load(sys.stdin)['action_link'])")
+
+# 3. "Clique": o GoTrue valida e redireciona com o token no FRAGMENTO
+TOKEN=$(curl -s -i "$LINK" | grep -i '^location' \
+  | sed 's/.*access_token=\\([^&]*\\).*/\\1/' | tr -d '\\r')
+
+# 4. O que a página de confirmação faz com o token
+curl -s -o /dev/null -w '%{http_code}\\n' -X POST \
+  http://localhost:8080/auth/supabase/aprovar \
+  -H 'Content-Type: application/json' \
+  -d "{\\"selector\\":\\"$SEL\\",\\"access_token\\":\\"$TOKEN\\"}"   # 204
+
+# 5. O polling do desktop recebe a sessão
+curl -s -X POST "http://localhost:8080/auth/login-status?selector=$SEL"
+```
+
+O passo 5 devolve `"status":"approved"` com o `access_token` da sessão — a mesma
+resposta que a aba original receberia sozinha, no ciclo seguinte de polling.
+
+Trocando o e-mail do passo 2 por outro, o passo 4 devolve `401` e o pedido
+continua pendente: é a verificação de que um token válido de **outra conta** não
+aprova este pedido.
+
+### O provedor fica gravado na linha
+
+`login_requests.provedor` guarda `LOCAL` ou `SUPABASE`. Se a decisão fosse lida da
+configuração no momento da validação, um reinício com o provedor trocado
+transformaria todo pedido em voo em algo invalidável: o código local não seria
+comparado com o hash que existe, e o código do GoTrue não existiria.
+
+Gravando o provedor, **um pedido termina do mesmo jeito que começou**.
+
+### Indisponibilidade não é código errado
+
+Um GoTrue fora do ar devolve `Indisponivel`, e não `Invalido`. A distinção
+protege o usuário: contar como tentativa faria uma queda de dois segundos
+consumir o orçamento dele e obrigá-lo a pedir um acesso novo. Vira `503` — o
+cliente não errou nada — e a tela diz "tente de novo em instantes" em vez de
+"código incorreto".
+
+---
+
+## 15. Containerização
 
 Quatro serviços. A pergunta não foi “quantos containers cabem”, e sim **onde a
 separação paga o próprio custo**:
@@ -485,29 +849,38 @@ publicados, e rodam com **usuário sem privilégios**.
 
 ---
 
-## 13. Testes
+## 16. Testes
 
-**448 testes.** Cobertura de **98,1 %** no backend .NET e **93,8 %** no frontend —
-ambos acima do mínimo de 80 % exigido, verificado no pipeline.
+**641 testes.** Cobertura de **83,6 %** no backend .NET e **89,2 %** de linhas no
+frontend — ambos acima do mínimo de 80 % exigido, verificado no pipeline.
 
-| Suíte                  | Testes | Ambiente                                    |
-| ---------------------- | ------ | ------------------------------------------- |
-| .NET — unidade         | 84     | Sem I/O: domínio, validação, HMAC           |
-| .NET — integração      | 74     | PostgreSQL real (Testcontainers)            |
-| Frontend — node        | 194    | PostgreSQL real                             |
-| Frontend — componentes | 55     | jsdom + Testing Library                     |
-| **Ponta a ponta**      | **41** | **Stack em containers, pela rede**          |
+| Suíte                  | Testes  | Ambiente                                    |
+| ---------------------- | ------- | ------------------------------------------- |
+| .NET — unidade         | 169     | Sem I/O: domínio, validação, HMAC, clientes HTTP com handler falso |
+| .NET — integração      | 86      | PostgreSQL real (Testcontainers)            |
+| Frontend — node        | 282     | PostgreSQL real                             |
+| Frontend — componentes | 54      | jsdom + Testing Library                     |
+| **Ponta a ponta**      | **50**  | **Stack em containers, pela rede**          |
+
+> A cobertura do .NET era de 98 % antes da observabilidade, do cliente Brevo e do
+> provedor GoTrue entrarem. O código novo tem testes, mas os caminhos de
+> configuração e de exportador não são exercitados — e inflar o número cobrindo
+> `AddOpenTelemetry(...)` mediria a biblioteca, não a aplicação.
 
 Os E2E (`tests/e2e/`) são os únicos que atravessam a **fiação real** — quatro
 containers, rede do Docker, migrations no entrypoint, worker em outro processo.
-Rodam o mesmo corpo de teste contra os **dois backends** e provam três coisas que
+Rodam o mesmo corpo de teste contra os **dois backends** e provam coisas que
 nenhum outro nível alcança:
 
 - o desktop entra sozinho depois que **outro cliente HTTP** abre o link
   (dois cookie jars separados — é a única forma honesta de provar cross-device);
 - o trabalho enfileirado por um processo é concluído por **outro container**;
-- a troca de backend muda os **dados**: um evento gravado em um devolve `404` no
-  outro.
+- a troca de backend **preserva os dados e a sessão**: um evento entregue a um
+  aparece no painel do outro, e uma reentrega no .NET reconhece como duplicata
+  algo que entrou pelo VINEXT;
+- o reenfileiramento **recusa** um evento já processado com sucesso, nos dois
+  backends, com a mesma mensagem — a proteção que impede dois cliques de dobrar
+  o valor liquidado de um contrato.
 
 ### Por que banco de verdade, e não provider em memória
 
@@ -529,7 +902,24 @@ filtros do dashboard, paginação, autenticação por polling cross-device, expi
 força bruta no OTP, troca de backend, equivalência de contrato entre os dois
 backends e o cookie `httpOnly`.
 
-Além disso, `scripts/smoke-test.sh` faz uma varredura rápida (26 verificações)
+Somam-se a esses, das partes mais recentes:
+
+- **classificação de falha** — causa transitória versus permanente, prioridade do
+  `SQLSTATE` sobre o texto da mensagem, cadeia de causas cíclica sem travar, e o
+  padrão de retentar o que não foi reconhecido;
+- **paridade entre os dois catálogos de falha** — um teste lê o arquivo C# e
+  compara códigos e categorias com os do TypeScript, porque a duplicação só é
+  defensável enquanto algo verifica que ela não divergiu;
+- **reenfileiramento** — recusa de evento já processado, dois cliques seguidos
+  gerando um só job, tentativas zeradas, e o registro do erro anterior preservado;
+- **tradução da `DATABASE_URL`** — senha percent-encoded decodificada, e um host
+  remoto sem `sslmode` exigindo TLS assim mesmo;
+- **cliente Brevo e cliente GoTrue** — forma do corpo, header de autenticação, e a
+  garantia de que nenhuma falha deles vira `500` no login;
+- **provedor de identidade** — indisponibilidade separada de código inválido, e um
+  token válido de *outra* conta sendo recusado.
+
+Além disso, `scripts/smoke-test.sh` faz uma varredura rápida (27 verificações)
 sobre a stack no ar — se algo óbvio estiver quebrado, o CI falha em segundos em
 vez de esperar a suíte completa.
 
@@ -553,7 +943,7 @@ vez de esperar a suíte completa.
 
 ---
 
-## 14. CI/CD e deploy
+## 17. CI/CD e deploy
 
 **CI** — quatro jobs em paralelo, mais um portão que agrega o resultado:
 
@@ -582,7 +972,7 @@ passo pronto e inerte é mais honesto do que fingir uma publicação.
 
 ---
 
-## 15. Resumo das decisões
+## 18. Resumo das decisões
 
 | Decisão                              | Alternativa descartada        | Por quê                                                       |
 | ------------------------------------ | ----------------------------- | ------------------------------------------------------------- |
@@ -590,7 +980,9 @@ passo pronto e inerte é mais honesto do que fingir uma publicação.
 | Fila em tabela                       | RabbitMQ / Redis              | Evento e job na mesma transação; sem isso o trabalho pode sumir |
 | Worker em container próprio          | Background service na API     | A regra de 2 s não disputa CPU com a ingestão; escalam à parte |
 | EF Core no .NET, Prisma no VINEXT    | Prisma nos dois               | Prisma não gera cliente .NET; cada ORM na sua plataforma        |
-| Schemas separados                    | Schema compartilhado          | Dois ORMs disputariam as mesmas migrations                     |
+| Schema compartilhado                 | Um schema por backend         | Dado único: o evento aparece nos dois, e a troca não pede login |
+| EF Core dono das migrations          | Cada ORM migrando o seu        | Duas ferramentas na mesma tabela divergem em silêncio; o CI compara |
+| Enums em MAIÚSCULAS no banco         | Nome do membro do C#          | EF Core gravava `Sucesso` e Prisma `SUCESSO` — filtros perdiam linhas |
 | ApiKey **e** HMAC                    | Só um dos dois                | Um diz *quem chama*; o outro, que o *corpo está intacto*        |
 | Polling                              | WebSocket / SSE               | Evento único e de prazo curto; funciona igual nos dois backends |
 | Cookie `httpOnly`                    | Token em `localStorage`       | Um XSS não encontra o que roubar                                |
@@ -598,23 +990,46 @@ passo pronto e inerte é mais honesto do que fingir uma publicação.
 | PostgreSQL real nos testes           | Provider em memória           | Índice único e `SKIP LOCKED` não existem em memória             |
 | VINEXT no alvo Node                  | Cloudflare Workers            | Conexão TCP com o banco e laço em background                    |
 | `bootstrap-grid.css` apenas          | Bootstrap completo            | O reboot do Bootstrap brigaria com o preflight do Tailwind      |
+| Retry decidido pelo TIPO do erro     | Sempre 3 tentativas           | Causa permanente não melhora com repetição; só atrasa o aviso   |
+| Catálogo de falhas duplicado         | Pacote compartilhado          | Dependência de build entre backends que existem para ser independentes; teste de paridade guarda |
+| Explicação derivada do código        | Texto gravado na linha        | Melhorar um tooltip vira deploy, não `UPDATE` em massa          |
+| Reenfileirar devolve à fila          | Reprocessar no request        | 2 s segurando a conexão HTTP e um segundo caminho de processamento |
+| Uma `DATABASE_URL` para os dois      | Uma variável por backend      | Trocar para remoto virava transcrição em duas sintaxes          |
+| API HTTP da Brevo                    | SMTP                          | Erro imediato e legível; por SMTP a falha chega como `550` ou silêncio |
+| Conteúdo do e-mail em código         | Template no painel da Brevo   | Template remoto não entra em revisão nem no histórico           |
+| Pedido de login sempre local         | Delegar tudo ao GoTrue        | O GoTrue não tem polling; sem o selector local não há cross-device |
+| Token validado contra o GoTrue       | Validar a assinatura local    | Validação local aceita token já revogado                        |
 
 ---
 
-## 16. Limitações conhecidas
+## 19. Limitações conhecidas
 
-**Entrega de e-mail.** O link de acesso vai para o log do servidor e, em
-desenvolvimento, para a tela. Trocar por SMTP é implementar
-`ILoginNotificationSender` e registrar a nova implementação — nada mais no fluxo
-muda. A escolha é deliberada: exigir credenciais de SMTP para rodar
-`docker compose up` seria um obstáculo sem propósito.
+**Entrega de e-mail sem credenciais.** O envio real pela Brevo está implementado
+nos dois backends e é ativado por `BREVO_API_KEY`. Sem a chave, o link de acesso
+vai para o log do servidor e, em desenvolvimento, para a tela. A escolha é
+deliberada: exigir credenciais para rodar `docker compose up` seria um obstáculo
+sem propósito na avaliação. **Nunca houve uma chave real neste repositório** — a
+integração foi verificada contra um servidor HTTP falso, não contra a Brevo.
+
+**Modo Supabase sem SMTP.** Com `AUTH_PROVIDER=supabase` e sem SMTP configurado,
+o link de acesso fica no log do *container do GoTrue*, e não na resposta — ele é
+montado dentro do GoTrue e nunca passa pela nossa aplicação. É o preço de
+delegar a identidade, e está documentado no `.env` porque é o tipo de coisa que
+faz alguém concluir que "o login parou de funcionar".
 
 **Rotação de chaves do webhook.** A `ApiKey` é única. Em um cenário com rotação, o
 próximo passo natural é aceitar um conjunto de chaves em vez de uma só.
 
-**Reprocessamento manual.** Eventos em `ERRO` ficam registrados com o motivo, mas
-não há botão para reenfileirar. O payload bruto está preservado, então o
-reprocessamento é possível — só não tem interface ainda.
+**Cobertura do código de configuração.** A observabilidade, o cliente Brevo e o
+provedor GoTrue têm testes de comportamento, mas os caminhos de *montagem*
+(`AddOpenTelemetry(...)`, seleção de exportador) não são exercitados. Cobri-los
+mediria a biblioteca, não a aplicação — e o número global caiu de 98 % para 84 %
+por causa disso. O limiar de 80 % continua sendo respeitado.
+
+**Tracing entre os backends não é correlacionado.** Cada serviço emite os próprios
+spans, mas o `traceparent` não é propagado do webhook para o job — o trabalho é
+assíncrono e a propagação exigiria carregar o contexto na linha da fila. É o
+próximo passo natural da observabilidade, e não foi feito.
 
 **Rate limit do login e a suíte E2E.** O endpoint de autenticação aceita 10
 pedidos por minuto por IP — apropriado para produção, apertado para uma suíte que

@@ -31,6 +31,17 @@ verde() { printf '\033[32m  OK\033[0m   %s\n' "$1"; }
 vermelho() { printf '\033[31m  FALHOU\033[0m %s\n' "$1"; falhas=$((falhas + 1)); }
 secao() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
+# Consulta o banco da stack.
+#
+# As credenciais vem do ambiente porque elas MUDARAM: o banco passou a ser o
+# `supabase/postgres`, cujo superusuario e `postgres`, e o schema da aplicacao
+# virou `sabemi` (antes eram dois: `dotnet` e `vinext`). Um script com o usuario
+# antigo escrito a mao falharia com "database does not exist" - que parece um
+# problema da stack, e nao do proprio script.
+psql_sabemi() {
+  docker compose exec -T postgres     psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-postgres}" -tAc "$1"     2>/dev/null
+}
+
 # Compara o codigo HTTP obtido com o esperado.
 checar() {
   local descricao="$1" esperado="$2" obtido="$3"
@@ -154,13 +165,20 @@ curl -s -o /dev/null -X POST "$API/webhooks/pagamento" \
   -H 'Content-Type: application/json' -H "X-Api-Key: $API_KEY" \
   -d "$(payload "$trx" "CTR-PROC-$sufixo" 99.99)"
 
-# O worker roda em outro container: a espera precisa ser por sondagem.
+# O processamento roda em OUTRO processo: a espera precisa ser por sondagem.
+#
+# Nao se afirma QUAL worker processou, e isso mudou de proposito. Com o schema
+# compartilhado, o worker .NET e o laco do BFF consomem a MESMA fila - quem
+# reivindica primeiro e uma corrida legitima, e exigir um deles especificamente
+# faria este teste falhar de forma intermitente por um comportamento correto.
+#
+# O que importa e que o trabalho enfileirado por um processo foi concluido por
+# outro. Qual dos dois nao muda o resultado para quem opera.
 processado=0
 for _ in $(seq 1 30); do
-  if docker compose exec -T postgres \
-       psql -U sabemi -d sabemi -tAc \
-       "SELECT status_processamento FROM dotnet.payment_events WHERE id_transacao = '$trx'" \
-       2>/dev/null | grep -q Sucesso; then
+  if psql_sabemi \
+       "SELECT status_processamento FROM sabemi.payment_events WHERE id_transacao = '$trx'" \
+       | grep -qi 'SUCESSO'; then
     processado=1
     break
   fi
@@ -168,16 +186,17 @@ for _ in $(seq 1 30); do
 done
 
 if [ "$processado" = "1" ]; then
-  verde "O worker .NET processou o evento e concluiu o job"
+  verde "O evento foi processado em background e o job foi concluido"
 else
-  vermelho "O worker .NET nao processou o evento em 60s"
+  vermelho "O evento nao foi processado em 60s"
 fi
 
 # O efeito colateral tambem precisa ter acontecido: evento processado com
 # contrato desatualizado seria uma transacao pela metade.
-total="$(docker compose exec -T postgres psql -U sabemi -d sabemi -tAc \
-  "SELECT valor_total_liquidado FROM dotnet.contract_statuses WHERE id_contrato = 'CTR-PROC-$sufixo'" \
-  2>/dev/null | tr -d ' \r')"
+total="$(psql_sabemi \
+  "SELECT valor_total_liquidado FROM sabemi.contract_statuses WHERE id_contrato = 'CTR-PROC-$sufixo'" \
+  | tr -d ' 
+')"
 
 if [ "$total" = "99.99" ]; then
   verde "O contrato foi consolidado com o valor correto ($total)"
