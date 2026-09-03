@@ -242,15 +242,33 @@ export async function sessaoAutenticada(
     throw new Error(`Nao foi possivel selecionar o backend ${backendId}.`);
   }
 
-  const inicio = await cliente.post<{ selector: string; dev_magic_url: string }>(
-    "/api/auth/login?step=start",
-    { email: `e2e-${backendId}-${Date.now()}@sabemi.com.br` },
-  );
+  const inicio = await cliente.post<{
+    selector: string;
+    dev_magic_url: string;
+    email_sent: boolean;
+  }>("/api/auth/login?step=start", {
+    email: `e2e-${backendId}-${Date.now()}@sabemi.com.br`,
+  });
 
   if (inicio.status !== 200) {
     throw new Error(
       `Falha ao iniciar o login no backend ${backendId}: HTTP ${inicio.status}. ` +
         `Se for 429, suba a stack com AUTH_RATE_LIMIT maior (ver tests/e2e/README.md).`,
+    );
+  }
+
+  // A suite autentica com enderecos INVENTADOS. Se a stack tiver um provedor de
+  // e-mail configurado, ela envia para eles de verdade - e cada um vira um hard
+  // bounce, que e exatamente o que corroi reputacao de envio.
+  //
+  // Aconteceu neste projeto: uma execucao com SMTP ativo gerou 26 bounces antes
+  // de alguem perceber. Documentar nao impede; abortar impede.
+  if (inicio.body.email_sent) {
+    throw new Error(
+      "A stack esta com um provedor de e-mail ATIVO, e esta suite autentica com " +
+        "enderecos inventados - cada login vira um hard bounce na conta.\n\n" +
+        "Suba a stack de teste sem provedor:\n" +
+        "  AUTH_RATE_LIMIT=500 BREVO_API_KEY= SMTP_HOST= docker compose up -d --wait",
     );
   }
 

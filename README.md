@@ -227,7 +227,7 @@ limite para todo mundo seria pior.
 | Variável | Para que serve |
 | --- | --- |
 | `BREVO_API_KEY` | Ativa o envio real. Vazio = link vai só para o log |
-| `BREVO_SENDER_EMAIL` | Remetente. Precisa ser de um domínio **verificado** na Brevo |
+| `BREVO_SENDER_EMAIL` | Remetente. Precisa estar **verificado** na Brevo |
 | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASSWORD` | Usadas **pelo GoTrue**, não pelos backends |
 
 > **A Brevo tem duas chaves diferentes, e elas não se substituem.**
@@ -237,13 +237,41 @@ limite para todo mundo seria pior.
 > | API v3 | `xkeysib-` | Settings → API keys | Os dois backends (`BREVO_API_KEY`) |
 > | SMTP | `xsmtpsib-` | Settings → SMTP | O GoTrue (`SMTP_PASSWORD`) |
 >
-> Pôr a chave SMTP em `BREVO_API_KEY` devolve `401` da API v3.
+> Pôr a chave SMTP em `BREVO_API_KEY` devolve `401` com `"Key not found"`.
+
+**A conta pode ter restrição de IP.** Se o log trouxer
+
+```
+A Brevo recusou o e-mail: HTTP 401. Resposta: {"message":"We have detected you
+are using an unrecognised IP address 177.4.239.187 ..."}
+```
+
+a chave está certa — falta autorizar o IP em
+[app.brevo.com/security/authorised_ips](https://app.brevo.com/security/authorised_ips).
+
+Autorize o IP que aparece **na mensagem de erro** — não o que o navegador mostra.
+Eles costumam ser diferentes: o navegador pode sair por IPv6 enquanto o container
+sai pelo IPv4 público da rede, e a Brevo trata os dois como endereços distintos.
+Autorizar o errado deixa tudo igual, com a mesma mensagem.
+
+A restrição vale só para a **API** — o relay SMTP (usado pelo GoTrue) não é
+afetado, e é por isso que o modo `AUTH_PROVIDER=supabase` pode estar enviando
+enquanto o modo local não.
+
+Em nenhum desses casos o login quebra: o backend registra o motivo, devolve
+`email_sent: false` e a tela mostra o link direto.
 
 Os dois backends usam a **mesma conta e o mesmo remetente**: o e-mail de acesso é
 o mesmo produto, venha de qual backend vier.
 
-Se o remetente não for de um domínio verificado, a Brevo recusa com `400` — e a
-mensagem dela não deixa isso óbvio. O log do backend mostra o corpo da resposta.
+Se o remetente não estiver verificado, a Brevo recusa com `400` — e a mensagem
+dela não deixa isso óbvio. O log do backend mostra o corpo da resposta.
+
+Para ver quais remetentes a sua conta aceita:
+
+```bash
+curl -s https://api.brevo.com/v3/senders -H "api-key: $BREVO_API_KEY"
+```
 
 > **Nas `SMTP_*`, preencha os três ou nenhum.** O GoTrue só registra o link no
 > log quando **não há** host de SMTP. Com host definido e sem usuário/senha, ele
@@ -305,7 +333,7 @@ Estas têm default no código e no compose. Só defina se precisar mudar:
 Use-as na linha de comando quando for pontual:
 
 ```bash
-AUTH_RATE_LIMIT=500 docker compose up -d     # o que a suíte E2E faz
+AUTH_RATE_LIMIT=500 BREVO_API_KEY= docker compose up -d   # o que a suíte E2E faz
 ```
 
 **Sobre `PROCESSING_SIMULATED_WORK_MS`:** é este o tempo que o webhook **não
@@ -368,7 +396,7 @@ Atravessam a fiação de verdade: containers separados, rede do Docker, worker e
 outro processo. Rodam contra os **dois backends**.
 
 ```bash
-AUTH_RATE_LIMIT=500 docker compose up -d --wait
+AUTH_RATE_LIMIT=500 BREVO_API_KEY= SMTP_HOST= docker compose up -d --wait
 
 cd tests/e2e && pnpm install && pnpm test
 ```

@@ -8,7 +8,7 @@ fariam. Nada é substituído por duble.
 
 ```bash
 # Na raiz do repositório
-AUTH_RATE_LIMIT=500 docker compose up -d --wait
+AUTH_RATE_LIMIT=500 BREVO_API_KEY= SMTP_HOST= docker compose up -d --wait
 
 cd tests/e2e
 pnpm install
@@ -19,6 +19,16 @@ pnpm test
 > minuto por IP — apropriado para produção, apertado para uma suíte que faz
 > dezenas de autenticações do mesmo IP em segundos. Sem isso os testes recebem
 > `429` e falham por um limite que está funcionando corretamente.
+>
+> **Por que `BREVO_API_KEY=` e `SMTP_HOST=`.** A suíte autentica com endereços
+> inventados (`e2e-dotnet-1788405946722@sabemi.com.br`). Com um provedor de
+> e-mail configurado, a stack **envia de verdade** para eles — e cada um vira um
+> hard bounce na conta, que é exatamente o que corrói reputação de envio.
+>
+> Aconteceu neste projeto: uma execução no modo `supabase` com SMTP ativo gerou
+> 26 bounces antes de alguém perceber. Os endereços foram para a blocklist da
+> Brevo, que é o comportamento certo dela — mas o estrago é acumulativo e não se
+> desfaz.
 
 Para apontar para outro ambiente:
 
