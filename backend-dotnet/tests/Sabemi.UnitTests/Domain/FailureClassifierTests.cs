@@ -83,6 +83,29 @@ public class FailureClassifierTests
     }
 
     [Fact]
+    public void Chave_primaria_nula_do_EF_Core_e_PERMANENTE()
+    {
+        // Divergência encontrada na stack real, não em teste: um evento sem
+        // `id_contrato` era classificado como PERMANENTE pelo backend VINEXT (o
+        // Prisma lança `PrismaClientValidationError`) e como DESCONHECIDA pelo
+        // .NET, cuja mensagem do EF Core não casava com nenhuma agulha.
+        //
+        // A consequência era visível: o .NET gastava três tentativas por uma
+        // chave que nunca passaria a existir, e o painel mostrava "falha não
+        // classificada" em vez de uma ação útil - para a MESMA falha que o outro
+        // backend explicava direito.
+        var ex = new InvalidOperationException(
+            "Unable to track an entity of type 'ContractStatus' because its "
+            + "primary key property 'IdContrato' is null.");
+
+        var d = FailureClassifier.Classify(ex);
+
+        d.Category.ShouldBe(FailureCategory.Permanente);
+        d.Code.ShouldBe("DADO_INVALIDO");
+        d.IsRetryable.ShouldBeFalse();
+    }
+
+    [Fact]
     public void A_causa_e_procurada_na_excecao_INTERNA()
     {
         // O Npgsql envelopa o erro do PostgreSQL: olhar so a mensagem de fora

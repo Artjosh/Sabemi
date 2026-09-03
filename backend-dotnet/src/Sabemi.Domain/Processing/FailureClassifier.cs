@@ -94,6 +94,21 @@ public static class FailureClassifier
         ("violates check constraint", "REGRA_DE_NEGOCIO_VIOLADA"),
         ("violates not-null", "CAMPO_OBRIGATORIO_AUSENTE"),
         ("numeric field overflow", "VALOR_FORA_DA_FAIXA"),
+
+        // Chave primaria nula, recusada pelo rastreador do EF Core antes de
+        // qualquer ida ao banco. E dado invalido: a chave nao passa a existir na
+        // segunda tentativa.
+        //
+        // Esta agulha existe porque os dois backends estavam classificando a
+        // MESMA falha de formas diferentes. Um evento sem `id_contrato` faz o
+        // Prisma lancar `PrismaClientValidationError`, que o BFF reconhece como
+        // permanente e encerra na primeira tentativa; ja o EF Core lanca um
+        // `InvalidOperationException` cuja mensagem nao casava com nada, entao o
+        // .NET tratava como desconhecida, retentava tres vezes e mostrava "falha
+        // nao classificada" ao operador - sem acao sugerida util.
+        //
+        // Divergencia observada na stack real, nao em teste.
+        ("because its primary key property", "DADO_INVALIDO"),
     ];
 
     /// <summary>
