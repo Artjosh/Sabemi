@@ -146,16 +146,20 @@ public static class PostgresConnectionString
             _ => hostLocal ? SslMode.Prefer : SslMode.Require,
         };
 
-        // `Require` sem `verify-*` significa "criptografe, mas não valide a
-        // cadeia". O Supabase usa um certificado assinado por uma CA que não está
-        // no trust store padrão da imagem, e sem isto a conexão falha com
-        // "remote certificate is invalid". Para validar de verdade, use
+        // Nao se mexe em `TrustServerCertificate` aqui, e a razao mudou de lugar:
+        // no Npgsql atual o proprio `SslMode.Require` ja significa "criptografe,
+        // mas nao valide a cadeia", e a propriedade virou obsoleta - "no longer
+        // needed and does nothing", nas palavras do proprio pacote.
+        //
+        // O comportamento continua o mesmo, e continua sendo o que o Supabase
+        // exige: ele usa um certificado assinado por uma CA que nao esta no trust
+        // store padrao da imagem, e validar a cadeia falharia com "remote
+        // certificate is invalid". Para validar de verdade, use
         // `sslmode=verify-full` e monte o certificado da CA no container.
-        if (construtor.SslMode == SslMode.Require)
-        {
-            construtor.TrustServerCertificate = true;
-        }
-
+        //
+        // A linha saiu porque o CI compila com `TreatWarningsAsErrors` e o
+        // obsoleto passou a quebrar o build - manter codigo que o proprio driver
+        // declara inutil nao valeria o custo.
         return construtor.ToString();
     }
 }

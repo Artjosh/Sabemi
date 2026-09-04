@@ -207,6 +207,7 @@ public class RequeueTests(PostgresFixture postgres) : IAsyncLifetime
         resultado.Failure.ShouldBe(PaymentRequeueService.RequeueFailure.NotEligible);
 
         // A mensagem e mostrada ao operador tal como vem: precisa dizer POR QUE.
+        resultado.Message.ShouldNotBeNull();
         resultado.Message.ShouldContain("ja esta somado ao contrato");
 
         await using var leitura = postgres.CreateDbContext();
@@ -238,6 +239,7 @@ public class RequeueTests(PostgresFixture postgres) : IAsyncLifetime
 
         var segundo = await servico.RequeueAsync("TRX-2X");
         segundo.Ok.ShouldBeFalse();
+        segundo.Message.ShouldNotBeNull();
         segundo.Message.ShouldContain("ja esta na fila");
 
         await using var leitura = postgres.CreateDbContext();
@@ -264,6 +266,7 @@ public class RequeueTests(PostgresFixture postgres) : IAsyncLifetime
         var resultado = await MontarRequeue(leitura).RequeueAsync("TRX-INV");
 
         resultado.Ok.ShouldBeFalse();
+        resultado.Message.ShouldNotBeNull();
         resultado.Message.ShouldContain("corrija na origem", Case.Insensitive);
     }
 

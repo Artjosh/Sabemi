@@ -29,8 +29,7 @@ namespace Sabemi.IntegrationTests.Support;
 /// </remarks>
 public sealed class PostgresFixture : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder()
-        .WithImage("postgres:17-alpine")
+    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:17-alpine")
         .WithDatabase("sabemi_test")
         .WithUsername("sabemi")
         .WithPassword("sabemi")
@@ -81,6 +80,13 @@ public sealed class PostgresFixture : IAsyncLifetime
         var schema = SabemiDbContext.Schema;
 
         await using var db = CreateDbContext();
+
+        // EF1002 avisa sobre SQL interpolado, e esta certo em geral: interpolar
+        // entrada de usuario e injecao. Aqui o unico valor interpolado e
+        // `SabemiDbContext.Schema`, uma constante do proprio codigo - nao ha
+        // origem externa. Parametrizar nao e opcao: nome de schema nao pode ser
+        // parametro de bind.
+#pragma warning disable EF1002
         await db.Database.ExecuteSqlRawAsync(
             $"""
             TRUNCATE TABLE {schema}.processing_jobs,
@@ -90,6 +96,7 @@ public sealed class PostgresFixture : IAsyncLifetime
                            {schema}.users
             RESTART IDENTITY CASCADE
             """);
+#pragma warning restore EF1002
     }
 }
 

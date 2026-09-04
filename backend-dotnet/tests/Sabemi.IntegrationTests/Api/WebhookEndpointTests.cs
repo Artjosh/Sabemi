@@ -294,6 +294,7 @@ public class WebhookEndpointTests(PostgresFixture postgres) : IAsyncLifetime
 
         using var scope = _factory.CreateServiceScope();
         var evento = await _factory.Db(scope).PaymentEvents.FirstAsync(e => e.IdTransacao == "TRX-FUTURO");
+        evento.Erro.ShouldNotBeNull();
         evento.Erro.ShouldContain("futuro");
     }
 

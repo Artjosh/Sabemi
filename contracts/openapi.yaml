@@ -233,6 +233,8 @@ paths:
     get:
       tags: [auth]
       summary: Dados do usuario autenticado
+      security:
+        - BearerAuth: []
       responses:
         '200':
           description: Usuario da sessao corrente.
@@ -252,6 +254,8 @@ paths:
     get:
       tags: [payments]
       summary: Lista os eventos de pagamento recebidos (dashboard)
+      security:
+        - BearerAuth: []
       description: |
         Alimenta o dashboard administrativo. O cliente atualiza por polling; a
         paginacao e por offset para manter o contrato simples e identico nos
@@ -293,6 +297,8 @@ paths:
     get:
       tags: [payments]
       summary: Contadores por situacao, para os cartoes do dashboard
+      security:
+        - BearerAuth: []
       responses:
         '200':
           description: Totais agregados.
@@ -311,6 +317,8 @@ paths:
     get:
       tags: [payments]
       summary: Detalhe de um evento, incluindo o payload bruto recebido
+      security:
+        - BearerAuth: []
       parameters:
         - in: path
           name: transactionId
@@ -334,6 +342,8 @@ paths:
     get:
       tags: [payments]
       summary: Estado consolidado de um contrato
+      security:
+        - BearerAuth: []
       parameters:
         - in: path
           name: contractId
@@ -395,6 +405,16 @@ components:
       type: apiKey
       in: cookie
       name: sabemi_session
+      description: |
+        Usado pelo gateway do frontend, que guarda o JWT em cookie httpOnly. A API
+        em si nao le cookie - quem fala direto com ela usa `BearerAuth`.
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT de sessao emitido pelo fluxo de acesso. E o que a API exige nas rotas
+        do dashboard; o cookie e um detalhe do gateway, nao desta API.
 
   schemas:
     ProcessingStatus:
@@ -466,21 +486,19 @@ components:
       properties:
         id: { type: string, format: uuid }
         id_transacao: { type: string }
-        id_contrato: { type: string, nullable: true }
-        valor: { type: number, nullable: true }
-        data_pagamento: { type: string, format: date-time, nullable: true }
+        id_contrato: { type: [string, 'null'] }
+        valor: { type: [number, 'null'] }
+        data_pagamento: { type: [string, 'null'], format: date-time }
         status_origem:
-          type: string
-          nullable: true
+          type: [string, 'null']
           description: O `status` cru enviado pelo banco parceiro.
         status_processamento:
           $ref: '#/components/schemas/ProcessingStatus'
         erro:
-          type: string
-          nullable: true
+          type: [string, 'null']
           description: Motivo da falha de validacao ou de processamento.
         recebido_em: { type: string, format: date-time }
-        processado_em: { type: string, format: date-time, nullable: true }
+        processado_em: { type: [string, 'null'], format: date-time }
         tentativas: { type: integer, minimum: 0 }
 
     PaymentEventDetail:
@@ -517,8 +535,8 @@ components:
         id_contrato: { type: string }
         valor_total_liquidado: { type: number }
         pagamentos_confirmados: { type: integer }
-        ultimo_pagamento_em: { type: string, format: date-time, nullable: true }
-        ultima_transacao: { type: string, nullable: true }
+        ultimo_pagamento_em: { type: [string, 'null'], format: date-time }
+        ultima_transacao: { type: [string, 'null'] }
         situacao:
           type: string
           enum: [ATIVO, LIQUIDADO, INADIMPLENTE]
@@ -544,12 +562,10 @@ components:
         email: { type: string, format: email }
         email_sent: { type: boolean }
         dev_magic_url:
-          type: string
-          nullable: true
+          type: [string, 'null']
           description: Somente em desenvolvimento; `null` em producao.
         dev_otp_code:
-          type: string
-          nullable: true
+          type: [string, 'null']
           description: Somente em desenvolvimento; `null` em producao.
         message: { type: string }
 
@@ -562,12 +578,11 @@ components:
           enum: [pending, approved]
         authenticated: { type: boolean }
         access_token:
-          type: string
-          nullable: true
+          type: [string, 'null']
           description: |
             Presente apenas quando `approved`. Consumido pelo gateway do
             frontend, que o grava em cookie httpOnly - nunca chega ao browser.
-        expires_in: { type: integer, nullable: true }
+        expires_in: { type: [integer, 'null'] }
         user:
           oneOf:
             - $ref: '#/components/schemas/User'

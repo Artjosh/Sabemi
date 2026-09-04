@@ -4,7 +4,17 @@
 
 ---
 
-**618 testes** no total.
+**618 testes** no total, **~2,5 min** para rodar tudo com a stack no ar.
+
+| Suíte | Tempo | Precisa de |
+| --- | --- | --- |
+| .NET (unidade + integração) | 41 s | Docker, para o Testcontainers |
+| Frontend + BFF | 44 s | PostgreSQL no ar |
+| Ponta a ponta | 57 s | A stack inteira |
+| Teste de fumaça | 7 s | A stack inteira |
+
+Com cobertura: 31 s no .NET e 44 s no frontend. Os 24 s do .NET são o
+Testcontainers subindo o PostgreSQL — os 141 testes de unidade levam 0,2 s.
 
 ```bash
 # Backend .NET — 229 testes (unidade + integração com PostgreSQL real)

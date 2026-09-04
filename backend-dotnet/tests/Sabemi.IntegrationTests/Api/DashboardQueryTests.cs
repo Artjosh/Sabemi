@@ -150,7 +150,13 @@ public class DashboardQueryTests(PostgresFixture postgres) : IAsyncLifetime
         var pagina = await Servico(db).ListAsync(PaymentQuery.From("ERRO", null, null, null));
 
         pagina.Items.ShouldAllBe(e => e.Erro != null);
-        pagina.Items[0].Erro.ShouldContain("gateway indisponivel");
+
+        // Em um local: o compilador nao propaga o estado de nulo atraves de um
+        // indexador entre instrucoes - ele nao tem como provar que `Items[0]`
+        // devolve o mesmo objeto duas vezes.
+        var erro = pagina.Items[0].Erro;
+        erro.ShouldNotBeNull();
+        erro.ShouldContain("gateway indisponivel");
     }
 
     [Fact]
@@ -328,6 +334,7 @@ public class AuthExpiryTests(PostgresFixture postgres) : IAsyncLifetime
         repetido.Failure.ShouldBe(AuthFailure.ResendTooSoon);
 
         // A mensagem traz os segundos que faltam: a tela mostra isso ao usuario.
+        repetido.Message.ShouldNotBeNull();
         repetido.Message.ShouldMatch(@"Aguarde \d+s");
 
         // O pedido original continua servindo.

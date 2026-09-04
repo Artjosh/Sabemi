@@ -137,8 +137,9 @@ public class AuthPollingTests(PostgresFixture postgres) : IAsyncLifetime
         // diferente (outro aparelho), e a aba de origem entra sozinha.
         var inicio = await IniciarLogin();
 
-        (await Poll(inicio.Selector)).Content
-            .ReadFromJsonAsync<LoginStatusDto>().Result!.Status.ShouldBe("pending");
+        var pendente = await (await Poll(inicio.Selector)).Content
+            .ReadFromJsonAsync<LoginStatusDto>();
+        pendente!.Status.ShouldBe("pending");
 
         // "Outro dispositivo" abre o link.
         using var outroDispositivo = _factory.CreateClient();

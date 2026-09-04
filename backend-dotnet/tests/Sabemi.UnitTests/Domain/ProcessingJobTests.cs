@@ -143,6 +143,7 @@ public class ProcessingJobTests
         // item perder o orcamento de tentativas por culpa de quedas do worker.
         job.Tentativas.ShouldBe(tentativasAntes);
         job.ReivindicadoPor.ShouldBeNull();
+        job.UltimoErro.ShouldNotBeNull();
         job.UltimoErro.ShouldContain("lease");
     }
 }

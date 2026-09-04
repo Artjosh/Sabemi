@@ -64,22 +64,23 @@ public class PostgresConnectionStringTests
     [Theory]
     // Host remoto sem `sslmode` ainda exige TLS: trafegar credencial de banco em
     // claro pela internet nao pode depender de alguem lembrar do parametro.
-    [InlineData("db.exemplo.com", null, SslMode.Require, true)]
+    [InlineData("db.exemplo.com", null, SslMode.Require)]
 
     // Local nao exige: dentro da rede do Docker nao ha o que interceptar, e
     // exigir TLS ali quebraria o desenvolvimento sem ganho.
-    [InlineData("localhost", null, SslMode.Prefer, false)]
-    [InlineData("postgres", null, SslMode.Prefer, false)]
+    [InlineData("localhost", null, SslMode.Prefer)]
+    [InlineData("postgres", null, SslMode.Prefer)]
 
     // O parametro explicito vence em qualquer direcao.
-    [InlineData("db.exemplo.com", "disable", SslMode.Disable, false)]
-    [InlineData("db.exemplo.com", "require", SslMode.Require, true)]
+    [InlineData("db.exemplo.com", "disable", SslMode.Disable)]
+    [InlineData("db.exemplo.com", "require", SslMode.Require)]
 
-    // `verify-full` NAO confia cegamente: quem pede verificacao do certificado
-    // quer a verificacao, e nao o oposto dela.
-    [InlineData("db.exemplo.com", "verify-full", SslMode.VerifyFull, false)]
+    // `verify-full` valida a cadeia; `require` criptografa sem validar. A
+    // distincao mora no proprio SslMode desde que `TrustServerCertificate` virou
+    // obsoleta no Npgsql - nao ha mais um segundo parametro a conferir aqui.
+    [InlineData("db.exemplo.com", "verify-full", SslMode.VerifyFull)]
     public void O_TLS_e_decidido_pelo_host_e_pelo_sslmode(
-        string host, string? sslmode, SslMode esperado, bool confiaNoCertificado)
+        string host, string? sslmode, SslMode esperado)
     {
         var url = $"postgresql://u:p@{host}/postgres"
             + (sslmode is null ? "" : $"?sslmode={sslmode}");
@@ -87,7 +88,6 @@ public class PostgresConnectionStringTests
         var conexao = Resolver(Ambiente(("DATABASE_URL", url)));
 
         conexao.SslMode.ShouldBe(esperado);
-        conexao.TrustServerCertificate.ShouldBe(confiaNoCertificado);
     }
 
     [Fact]

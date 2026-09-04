@@ -213,6 +213,7 @@ public class ProcessingTests(PostgresFixture postgres) : IAsyncLifetime
         var evento = await db.PaymentEvents.SingleAsync();
         // Ainda Pendente, nao Erro: ha tentativas pela frente.
         evento.StatusProcessamento.ShouldBe(ProcessingStatus.Pendente);
+        evento.Erro.ShouldNotBeNull();
         evento.Erro.ShouldContain("falha simulada");
     }
 
