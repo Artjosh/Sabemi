@@ -323,10 +323,6 @@ export function LoginForm() {
           </>
         )}
       </Card>
-
-      <p className="text-center text-xs leading-relaxed text-fg-muted">
-        O token de sessão fica em cookie <code>httpOnly</code> — nunca acessível ao JavaScript.
-      </p>
     </div>
   );
 }
