@@ -969,7 +969,7 @@ publicados, e rodam com **usuário sem privilégios**.
 
 ## 16. Testes
 
-**618 testes.** Cobertura de **84,0 %** no backend .NET e **89,1 %** de linhas no
+**630 testes.** Cobertura de **81,6 %** no backend .NET e **88,9 %** de linhas no
 frontend — ambos acima do mínimo de 80 % exigido, verificado no pipeline.
 
 | Suíte                  | Testes  | Ambiente                                    |

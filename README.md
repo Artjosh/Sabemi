@@ -52,10 +52,9 @@ Três serviços no Railway (`api`, `worker`, `frontend`), construídos pelos
 Dockerfiles do próprio repositório, com um **Supabase** como banco compartilhado.
 O `worker` não tem domínio: ele não atende requisição, só consome a fila.
 
-Para entrar, peça o acesso com qualquer e-mail — o painel exibe o link e o código
-de 6 dígitos na própria tela. **Isso é deliberado nesta demonstração**
-(`AUTH_EXPOSE_LOGIN_CODES=true`), para dispensar infraestrutura de e-mail; em
-produção de verdade a variável fica `false` e o código só vai por e-mail.
+O acesso é por e-mail, sem senha: o sistema envia um link e um código de 6
+dígitos. O atalho de desenvolvimento que exibia o código na tela está
+**desligado** (`AUTH_EXPOSE_LOGIN_CODES=false`), como em produção de verdade.
 
 O deploy está descrito em [`docs/DEPLOY.md`](docs/DEPLOY.md), incluindo as
 armadilhas que ele revelou.

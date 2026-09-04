@@ -4,7 +4,7 @@
 
 ---
 
-**618 testes** no total, **~2,5 min** para rodar tudo com a stack no ar.
+**630 testes** no total, **~2,5 min** para rodar tudo com a stack no ar.
 
 | Suíte | Tempo | Precisa de |
 | --- | --- | --- |
@@ -17,12 +17,12 @@ Com cobertura: 31 s no .NET e 44 s no frontend. Os 24 s do .NET são o
 Testcontainers subindo o PostgreSQL — os 141 testes de unidade levam 0,2 s.
 
 ```bash
-# Backend .NET — 229 testes (unidade + integração com PostgreSQL real)
+# Backend .NET — 236 testes (148 unidade + 88 integração com PostgreSQL real)
 cd backend-dotnet
 dotnet test Sabemi.slnx --settings coverlet.runsettings --results-directory TestResults
 python scripts/check-coverage.py TestResults --min 80
 
-# Frontend + BFF — 337 testes. Precisa do PostgreSQL no ar
+# Frontend + BFF — 342 testes. Precisa do PostgreSQL no ar
 cd frontend
 pnpm test              # sem cobertura
 pnpm test:coverage     # com o limiar aplicado
@@ -34,7 +34,8 @@ migrado automaticamente antes de rodar — isso mantém a suíte independente da
 stack de desenvolvimento, cujo worker consumiria a mesma fila.
 
 O limiar de 80 % é verificado nos dois lados e **o CI falha abaixo dele**.
-Cobertura atual: **84,0 %** no .NET, **89,1 %** de linhas no frontend.
+Cobertura atual: **81,6 %** no .NET, **88,9 %** de linhas no frontend — as duas
+acima do portão do CI (80 % de linhas; 70 % de *branches* no frontend).
 
 ### Ponta a ponta — 52 testes contra a stack real
 
