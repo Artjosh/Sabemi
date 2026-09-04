@@ -42,7 +42,7 @@ interface ConexaoPostgres {
   host: string;
   port: number;
   database: string;
-  ssl: boolean;
+  ssl: false | { rejectUnauthorized: boolean };
 }
 
 /** Hosts que sao o Postgres desta stack, e nao um banco gerenciado. */
@@ -63,14 +63,32 @@ const HOSTS_LOCAIS = new Set(["localhost", "127.0.0.1", "::1", "postgres", "db"]
  * roda em rede interna do Docker e nao tem certificado, enquanto um host remoto
  * sempre precisa de TLS. Assim a mesma `DATABASE_URL` de sempre continua
  * funcionando local, e uma URL do Supabase funciona sem configuracao extra.
+ *
+ * O nivel de verificacao segue o libpq, nao o `pg` - ver o comentario dentro da
+ * funcao.
  */
-function lerSsl(url: URL): boolean {
+function lerSsl(url: URL): false | { rejectUnauthorized: boolean } {
   const modo = url.searchParams.get("sslmode");
 
   if (modo === "disable") return false;
-  if (modo) return true;
+  if (!modo && HOSTS_LOCAIS.has(url.hostname)) return false;
 
-  return !HOSTS_LOCAIS.has(url.hostname);
+  // `require` CIFRA mas NAO valida a cadeia do certificado - e a semantica do
+  // libpq, a mesma que o Npgsql aplica no backend .NET. Ela existe por um motivo
+  // pratico: o pooler do Supabase apresenta um certificado assinado pela CA
+  // deles, que nao esta no bundle do sistema.
+  //
+  // Isto NAO e detalhe de configuracao. O driver `pg` trata `require` como
+  // `verify-full` (ele mesmo avisa no log), e o resultado e
+  // `self-signed certificate in certificate chain` - um erro que fala de
+  // certificado quando a URL pedia apenas conexao cifrada. Custou um deploy
+  // inteiro: o entrypoint ficava repetindo "schema ainda nao pronto" porque a
+  // sonda dele falhava na conexao, nao no schema.
+  //
+  // Quem quiser validacao real pede `verify-full` (ou `verify-ca`)
+  // explicitamente na URL - e ai o comportamento e o do nome.
+  const validar = modo === "verify-full" || modo === "verify-ca";
+  return { rejectUnauthorized: validar };
 }
 
 function lerConexao(): ConexaoPostgres {
