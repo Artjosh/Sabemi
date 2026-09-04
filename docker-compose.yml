@@ -146,7 +146,13 @@ services:
       # Pedidos de login por minuto, por IP. O padrao e o valor de producao.
       # A suite ponta a ponta sobe a stack com um teto maior: ela faz dezenas
       # de logins do mesmo IP em segundos (ver tests/e2e/README.md).
-      RateLimit__AuthPermitLimit: ${AUTH_RATE_LIMIT:-10}
+      # 500 em desenvolvimento, e nao os 10/min de producao. O valor de producao
+      # aplicado a uma stack de desenvolvimento nao protege ninguem e atrapalha
+      # todo mundo: a suite ponta a ponta faz dezenas de logins do mesmo IP em
+      # segundos, e quem demonstra o painel clicando tambem estoura. O limite
+      # continua existindo e configuravel - `docker-compose.prod.yml` fixa o
+      # valor real, e nenhum `.env` de desenvolvimento o afrouxa la.
+      RateLimit__AuthPermitLimit: ${AUTH_RATE_LIMIT:-500}
     ports:
       # `/metrics` sai na MESMA porta da API: ele e um endpoint do ASP.NET, e nao
       # um listener separado como no worker.

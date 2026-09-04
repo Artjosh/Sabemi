@@ -4,7 +4,7 @@ import { defineConfig } from "vitest/config";
  * Testes ponta a ponta contra a stack em execucao.
  *
  * Pre-requisito:
- *   AUTH_RATE_LIMIT=500 docker compose up -d --wait
+ *   docker compose up -d --wait
  *
  * O teto de login precisa ser maior que o de producao: a suite faz dezenas de
  * autenticacoes do mesmo IP em segundos, e o limite real (10/min) a derrubaria.

@@ -55,6 +55,11 @@ services:
       # devolve link nem codigo OTP na resposta. Fixo, e nao vindo do ambiente -
       # nao ha valor de `.env` que ligue isto aqui.
       Auth__ExposeLoginCodesInDevelopment: "false"
+      # Fixo, e nao vindo do ambiente. Antes disto, producao herdava o padrao da
+      # base: um `AUTH_RATE_LIMIT=500` deixado no `.env` para rodar os testes
+      # seguiria valendo no servidor, e o teto de tentativas de login estaria
+      # cinquenta vezes mais alto sem ninguem ter decidido isso.
+      RateLimit__AuthPermitLimit: "10"
       Cors__AllowedOrigins__0: ${FRONTEND_PUBLIC_URL:?defina FRONTEND_PUBLIC_URL}
     deploy:
       resources:

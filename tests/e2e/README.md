@@ -8,17 +8,18 @@ fariam. Nada é substituído por duble.
 
 ```bash
 # Na raiz do repositório
-AUTH_RATE_LIMIT=500 docker compose up -d --wait
+docker compose up -d --wait
 
 cd tests/e2e
 pnpm install
 pnpm test
 ```
 
-> **Por que `AUTH_RATE_LIMIT=500`.** O endpoint de login aceita 10 pedidos por
-> minuto por IP — apropriado para produção, apertado para uma suíte que faz
-> dezenas de autenticações do mesmo IP em segundos. Sem isso os testes recebem
-> `429` e falham por um limite que está funcionando corretamente.
+> **Sobre o rate limit do login.** O endpoint aceita 500 pedidos por minuto por
+> IP em desenvolvimento e 10 em produção — esta suíte faz dezenas de
+> autenticações do mesmo IP em segundos, e o teto de produção a derrubaria com
+> `429` por um limite que está funcionando corretamente. O `docker-compose.yml`
+> já traz o valor de desenvolvimento; não é preciso prefixar nada.
 >
 ### Nenhum login desta suíte gera e-mail
 

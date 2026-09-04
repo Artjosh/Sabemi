@@ -298,11 +298,6 @@ jobs:
       # Construir nao prova que a imagem SOBE. Os dois passos abaixo levantam a
       # stack inteira e a exercitam de verdade.
       - name: Sobe a stack
-        env:
-          # Teto de login maior que o de producao: a suite ponta a ponta faz
-          # dezenas de autenticacoes do mesmo IP em segundos, e o limite real
-          # (10/min) a derrubaria por estar funcionando corretamente.
-          AUTH_RATE_LIMIT: "500"
         run: docker compose up -d --wait --wait-timeout 240
 
       # Verificacao rapida: se algo obvio estiver quebrado, falha aqui em

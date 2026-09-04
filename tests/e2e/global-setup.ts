@@ -43,6 +43,6 @@ export default async function setup() {
   throw new Error(
     `A stack não respondeu: ${quais}.\n\n` +
       "Suba antes de rodar a suíte:\n" +
-      "  AUTH_RATE_LIMIT=500 docker compose up -d --wait",
+      "  docker compose up -d --wait",
   );
 }
