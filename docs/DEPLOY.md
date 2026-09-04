@@ -45,6 +45,46 @@ As réplicas consomem a mesma fila sem conflito — a reivindicação usa
 
 ---
 
+### Auto-deploy: o GitHub avisa o Railway, e não o contrário
+
+O auto-deploy nativo do Railway depende de **duas** ligações, e só uma delas é
+óbvia:
+
+1. o **Railway GitHub App** instalado no repositório;
+2. o **vínculo OAuth** entre a conta do Railway e a do GitHub.
+
+A segunda não existe quando a conta do Railway foi criada por e-mail. O efeito
+confunde: com um repositório público o Railway **clona e constrói** normalmente
+(o painel até diz "Deployed via GitHub"), mas não consegue assinar os eventos de
+push. A tela do serviço mostra `GitHub Repo not found` sob "Branch connected to
+production", e a API recusa criar o gatilho com *"no one in the project has
+access to it"* — mensagem que aponta para permissão de repositório quando o que
+falta é o vínculo de conta.
+
+`scripts/deploy-railway.mjs` inverte a direção: o job de deploy do GitHub Actions
+chama a API do Railway. Um segredo, nenhum vínculo entre contas.
+
+Para ligar, dois segredos no repositório (Settings → Secrets and variables →
+Actions):
+
+| Segredo | Onde obter |
+| --- | --- |
+| `RAILWAY_TOKEN` | railway.com/account/tokens — token de **workspace** |
+| `RAILWAY_PROJECT_ID` | está na URL do projeto no painel |
+
+Sem eles o passo é ignorado em silêncio, e o restante do workflow segue igual.
+
+> **Sobre o token:** um token de workspace não responde às consultas de conta
+> (`me`, `githubRepos`) — elas voltam `Not Authorized` mesmo com o token válido.
+> Isso confunde na hora de testar: o caminho para verificar que o token funciona
+> é consultar `projects`, não `me`.
+
+Também dá para rodar à mão, o que é útil ao configurar:
+
+```bash
+RAILWAY_TOKEN=... RAILWAY_PROJECT_ID=... node scripts/deploy-railway.mjs
+```
+
 ### O .NET usa a conexão DIRETA; o VINEXT usa o pooler
 
 Contra um Supabase, os dois backends precisam de portas diferentes — e isso não
