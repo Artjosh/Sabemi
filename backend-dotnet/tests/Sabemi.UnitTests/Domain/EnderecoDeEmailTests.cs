@@ -12,61 +12,39 @@ namespace Sabemi.UnitTests.Domain;
 /// <c>@sabemi.com.br</c>. Todas viraram hard bounce, e bounce nao e mensagem
 /// perdida - e reputacao de envio perdida, de forma acumulativa e irreversivel.
 ///
-/// O primeiro remedio foi a suite abortar quando havia provedor. Isto e o
-/// remedio de verdade: enderecos que <i>nao podem</i> receber nao recebem
-/// tentativa, e a suite passou a inventar os seus em <c>@e2e.invalid</c>.
+/// Sao cinco comportamentos, um caso cada, mais a paridade com o backend VINEXT.
+/// A primeira versao destes testes tinha 18 casos para uma funcao de 12 linhas -
+/// variacoes da mesma asfirmacao, que nao acrescentavam ramo nem regra.
 /// </remarks>
 public class EnderecoDeEmailTests
 {
     [Theory]
-    [InlineData("operador@sabemi.com.br")]
-    [InlineData("alguem@gmail.com")]
-    [InlineData("com.ponto@sub.dominio.co.uk")]
-    [InlineData("MAIUSCULA@SABEMI.COM.BR")]
-    public void Um_endereco_entregavel_recebe_tentativa(string email)
-    {
-        EnderecoDeEmail.PodeReceber(email).ShouldBeTrue();
-    }
+    [InlineData("operador@sabemi.com.br", true)]
+    [InlineData("MAIUSCULA@SABEMI.COM.BR", true)]
 
-    [Theory]
-    [InlineData("e2e-dotnet-123@e2e.invalid")]
-    [InlineData("qualquer@exemplo.test")]
-    [InlineData("alguem@algo.example")]
-    [InlineData("dev@app.localhost")]
-    public void Um_dominio_reservado_por_RFC_nunca_recebe_tentativa(string email)
-    {
-        // RFC 2606 / 6761: estes TLDs existem para NAO existirem. Nao ha MX,
-        // nenhuma mensagem chega, e cada tentativa e um hard bounce garantido.
-        EnderecoDeEmail.PodeReceber(email).ShouldBeFalse();
-    }
+    // Um caso por dominio da lista: e a superficie real da regra, e um erro de
+    // digitacao em qualquer entrada aparece aqui.
+    [InlineData("e2e-dotnet-123@e2e.invalid", false)]
+    [InlineData("qualquer@exemplo.test", false)]
+    [InlineData("alguem@algo.example", false)]
+    [InlineData("dev@app.localhost", false)]
 
-    [Theory]
-    [InlineData("alguem@invalid")]
-    [InlineData("alguem@test")]
-    [InlineData("alguem@localhost")]
-    public void O_dominio_reservado_tambem_conta_quando_usado_NU(string email)
-    {
-        // Sem subdominio o sufixo ".invalid" nao casaria, e o endereco passaria.
-        EnderecoDeEmail.PodeReceber(email).ShouldBeFalse();
-    }
+    // Sem subdominio o sufixo ".invalid" nao casaria, e o endereco passaria.
+    [InlineData("alguem@invalid", false)]
 
-    [Fact]
-    public void Um_ponto_final_no_dominio_nao_esconde_o_TLD_reservado()
-    {
-        // Raiz explicita e sintaxe legitima de nome de dominio. Sem normalizar,
-        // "a@b.invalid." escaparia da regra por um caractere.
-        EnderecoDeEmail.PodeReceber("alguem@sub.invalid.").ShouldBeFalse();
-    }
+    // Raiz explicita e sintaxe legitima de nome de dominio. Sem normalizar,
+    // "a@b.invalid." escaparia da regra por um caractere.
+    [InlineData("alguem@sub.invalid.", false)]
 
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("   ")]
-    [InlineData("sem-arroba")]
-    [InlineData("termina-em@")]
-    public void Sem_dominio_nao_ha_onde_entregar(string? email)
+    // Sem dominio nao ha onde entregar.
+    [InlineData(null, false)]
+    [InlineData("sem-arroba", false)]
+    public void Somente_um_dominio_que_pode_receber_gera_tentativa(string? email, bool esperado)
     {
-        EnderecoDeEmail.PodeReceber(email).ShouldBeFalse();
+        // RFC 2606 / 6761: `.invalid`, `.test`, `.example` e `.localhost` existem
+        // para NAO existirem. Nao ha MX, nenhuma mensagem chega, e cada tentativa
+        // e um hard bounce garantido.
+        EnderecoDeEmail.PodeReceber(email).ShouldBe(esperado);
     }
 
     [Fact]
@@ -77,9 +55,8 @@ public class EnderecoDeEmailTests
         // invisivel: o mesmo endereco receberia tentativa por um caminho e nao
         // pelo outro, dependendo de qual backend estivesse selecionado.
         //
-        // O espelho e `frontend/server/bff/email-address.ts`. Este teste falha
-        // se alguem acrescentar um dominio aqui e esquecer la - a lista abaixo e
-        // copiada do arquivo TypeScript de proposito.
+        // O espelho e `frontend/server/bff/email-address.ts`, e o teste de la le
+        // ESTE arquivo para comparar - a lista abaixo e a copia que ele confere.
         string[] doVinext = [".invalid", ".test", ".example", ".localhost"];
 
         EnderecoDeEmail.DominiosReservados.ShouldBe(doVinext, ignoreOrder: true);

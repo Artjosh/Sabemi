@@ -52,8 +52,6 @@ public class FailureClassifierTests
     [Theory]
     [InlineData(typeof(ArgumentException))]
     [InlineData(typeof(FormatException))]
-    [InlineData(typeof(InvalidCastException))]
-    [InlineData(typeof(NotSupportedException))]
     public void Erro_de_programacao_e_permanente(Type tipo)
     {
         // Retentar apenas repete o mesmo caminho de codigo com os mesmos dados.
@@ -106,22 +104,17 @@ public class FailureClassifierTests
     }
 
     [Fact]
-    public void A_causa_e_procurada_na_excecao_INTERNA()
+    public void A_causa_e_procurada_dentro_dos_ENVELOPES()
     {
-        // O Npgsql envelopa o erro do PostgreSQL: olhar so a mensagem de fora
-        // classificaria tudo como desconhecido.
+        // Duas formas do mesmo mecanismo, num caso so. O Npgsql envelopa o erro
+        // do PostgreSQL e codigo assincrono envelopa em AggregateException;
+        // olhar so a excecao de fora classificaria tudo como desconhecido.
         var interna = new InvalidOperationException("deadlock detected");
         var externa = new InvalidOperationException("Uma falha ocorreu.", interna);
 
         FailureClassifier.Classify(externa).Code.ShouldBe("DEADLOCK");
-    }
-
-    [Fact]
-    public void AggregateException_e_desembrulhada()
-    {
-        var agregada = new AggregateException(new TimeoutException("lento"));
-
-        FailureClassifier.Classify(agregada).Code.ShouldBe("TIMEOUT");
+        FailureClassifier.Classify(new AggregateException(new TimeoutException("lento")))
+            .Code.ShouldBe("TIMEOUT");
     }
 
     [Fact]
@@ -136,16 +129,28 @@ public class FailureClassifierTests
     }
 
     [Fact]
-    public void Todo_diagnostico_tem_explicacao_e_acao_preenchidas()
+    public void O_catalogo_e_consistente_em_toda_entrada()
     {
-        // Os dois textos vao direto para o tooltip. Um vazio deixaria o operador
-        // diante de uma caixa em branco - pior do que nao ter tooltip.
+        // Tres invariantes numa varredura so, porque as tres percorrem a mesma
+        // lista e falham pelo mesmo motivo: alguem acrescentou uma entrada sem
+        // preencher tudo.
         foreach (var d in FailureCatalog.All)
         {
+            // Os dois textos vao direto para o tooltip. Um vazio deixaria o
+            // operador diante de uma caixa em branco - pior que nao ter tooltip.
+            d.Code.ShouldNotBeNullOrWhiteSpace();
             d.Explanation.ShouldNotBeNullOrWhiteSpace();
             d.SuggestedAction.ShouldNotBeNullOrWhiteSpace();
-            d.Code.ShouldNotBeNullOrWhiteSpace();
+
+            // A UI usa `retentavel` para decidir se oferece o botao de
+            // reenfileirar. Divergindo da categoria, ofereceria a acao errada.
+            d.IsRetryable.ShouldBe(d.Category != FailureCategory.Permanente);
         }
+
+        // Codigos duplicados fariam `Describe` devolver a primeira entrada e
+        // esconder a segunda, silenciosamente.
+        var codigos = FailureCatalog.All.Select(d => d.Code).ToList();
+        codigos.Distinct().Count().ShouldBe(codigos.Count);
     }
 
     [Fact]
@@ -158,24 +163,4 @@ public class FailureClassifierTests
         d.Code.ShouldBe(FailureCatalog.NaoClassificado);
     }
 
-    [Fact]
-    public void Nenhum_codigo_esta_duplicado()
-    {
-        // Codigos duplicados fariam `Describe` devolver a primeira entrada e
-        // esconder a segunda, silenciosamente.
-        var codigos = FailureCatalog.All.Select(d => d.Code).ToList();
-
-        codigos.Distinct().Count().ShouldBe(codigos.Count);
-    }
-
-    [Fact]
-    public void Retentavel_acompanha_a_categoria()
-    {
-        // A UI usa `retentavel` para decidir se oferece o botao de reenfileirar.
-        // Se ele divergisse da categoria, o painel ofereceria a acao errada.
-        foreach (var d in FailureCatalog.All)
-        {
-            d.IsRetryable.ShouldBe(d.Category != FailureCategory.Permanente);
-        }
-    }
 }

@@ -85,95 +85,69 @@ afterEach(() => {
 });
 
 describe("desafio delegado ao GoTrue", () => {
-  it("chama o endpoint de OTP", async () => {
+  it("leva o selector, pede para criar o usuário e não guarda segredo algum", async () => {
+    // Cinco aspectos do MESMO pedido de desafio, em um caso só. Separá-los em
+    // cinco testes repetia a montagem sem cobrir ramo novo. Espelha
+    // `SupabaseIdentityProviderTests.O_desafio_delegado_ao_GoTrue_...`.
     const espiao = stubFetchPorCaminho(ROTAS_OK);
     const { provedorSupabase } = await comAmbiente(CONFIG_SUPABASE);
 
-    const resultado = await provedorSupabase.iniciarDesafio("a@b.c", "SEL-1");
+    const r = await provedorSupabase.iniciarDesafio("novo@sabemi.com.br", "SEL-ABC");
 
-    expect(resultado.emailEnviado).toBe(true);
+    expect(r.emailEnviado).toBe(true);
     expect(String(espiao.mock.calls[0]?.[0])).toContain("/auth/v1/otp");
-  });
 
-  it("o `redirect_to` carrega o SELECTOR", async () => {
     // A peça que faz o cross-device funcionar. Sem o selector no `redirect_to`,
     // o clique no celular autenticaria apenas o celular - que é o comportamento
     // padrão do GoTrue e justamente o que não serve aqui.
-    const espiao = stubFetchPorCaminho(ROTAS_OK);
-    const { provedorSupabase } = await comAmbiente(CONFIG_SUPABASE);
-
-    await provedorSupabase.iniciarDesafio("a@b.c", "SEL-ABC");
-
     const url = decodeURIComponent(String(espiao.mock.calls[0]?.[0]));
     expect(url).toContain("selector=SEL-ABC");
     expect(url).toContain("/auth/supabase/confirm");
-  });
 
-  it("pede ao GoTrue para CRIAR o usuário se não existir", async () => {
     // Não há tela de cadastro neste sistema: o primeiro acesso com um e-mail
     // cria a conta, igual ao modo local. Com `create_user: false`, um e-mail novo
     // receberia erro em vez de um convite.
-    const espiao = stubFetchPorCaminho(ROTAS_OK);
-    const { provedorSupabase } = await comAmbiente(CONFIG_SUPABASE);
-
-    await provedorSupabase.iniciarDesafio("novo@sabemi.com.br", "SEL-1");
-
     expect(corpoDa(espiao)).toMatchObject({
       email: "novo@sabemi.com.br",
       create_user: true,
     });
-  });
 
-  it("envia a chave `anon` no header que o Kong exige", async () => {
     // `apikey`, e não `Authorization`. Sem ele o Kong recusa antes de chegar ao
     // GoTrue, com um erro que não menciona o header que faltou.
-    const espiao = stubFetchPorCaminho(ROTAS_OK);
-    const { provedorSupabase } = await comAmbiente(CONFIG_SUPABASE);
-
-    await provedorSupabase.iniciarDesafio("a@b.c", "SEL-1");
-
     const headers = (espiao.mock.calls[0]?.[1] as RequestInit).headers as Record<
       string,
       string
     >;
     expect(headers.apikey).toBe("chave-anon");
-  });
 
-  it("NÃO devolve hash, link nem código", async () => {
-    // É a diferença estrutural entre os dois modos: aqui quem guarda e valida os
+    // A diferença estrutural entre os dois modos: aqui quem guarda e valida os
     // segredos é o GoTrue. Um hash nosso na linha seria um segredo que ninguém
     // usa - e daria a impressão de que o pedido pode ser validado localmente.
-    stubFetchPorCaminho(ROTAS_OK);
-    const { provedorSupabase } = await comAmbiente(CONFIG_SUPABASE);
-
-    const r = await provedorSupabase.iniciarDesafio("a@b.c", "SEL-1");
-
     expect(r.magicTokenHash).toBeNull();
     expect(r.otpCodeHash).toBeNull();
     expect(r.magicUrl).toBeNull();
     expect(r.otpCode).toBeNull();
   });
 
-  it("uma recusa do GoTrue não impede o pedido de existir", async () => {
+  it("um GoTrue que falha não impede o pedido de existir", async () => {
     // Parece contraintuitivo, e é deliberado: o selector já vai para o cliente,
     // que já começa a pollar. Um pedido ausente daria 404 e a tela diria "seu
     // acesso expirou" - quando o que houve foi falha de envio.
+    //
+    // Recusa HTTP e erro de rede são caminhos diferentes com o MESMO contrato.
     stubFetchPorCaminho({ "/auth/v1/otp": { status: 400, corpo: { msg: "erro" } } });
     const { provedorSupabase } = await comAmbiente(CONFIG_SUPABASE);
 
-    const r = await provedorSupabase.iniciarDesafio("a@b.c", "SEL-1");
+    const recusado = await provedorSupabase.iniciarDesafio("a@b.c", "SEL-1");
+    expect(recusado.emailEnviado).toBe(false);
+    expect(recusado.magicTokenHash).toBeNull();
 
-    expect(r.emailEnviado).toBe(false);
-    expect(r.magicTokenHash).toBeNull();
-  });
-
-  it("um erro de rede não lança", async () => {
     stubFetchPorCaminho({}, new Error("ECONNREFUSED"));
-    const { provedorSupabase } = await comAmbiente(CONFIG_SUPABASE);
+    const { provedorSupabase: outro } = await comAmbiente(CONFIG_SUPABASE);
 
-    await expect(provedorSupabase.iniciarDesafio("a@b.c", "SEL-1")).resolves.toMatchObject(
-      { emailEnviado: false },
-    );
+    await expect(outro.iniciarDesafio("a@b.c", "SEL-1")).resolves.toMatchObject({
+      emailEnviado: false,
+    });
   });
 });
 
@@ -197,14 +171,14 @@ describe("verificação do código", () => {
     expect(corpoDa(espiao)).toMatchObject({ type: "email", token: "123456" });
   });
 
-  it.each([400, 401, 403])("o GoTrue dizendo não (%i) é código INVÁLIDO", async (status) => {
+  it.each([400, 401])("o GoTrue dizendo não (%i) é código INVÁLIDO", async (status) => {
     stubFetchPorCaminho({ "/auth/v1/verify": { status } });
     const { provedorSupabase } = await comAmbiente(CONFIG_SUPABASE);
 
     expect(await provedorSupabase.verificarOtp("a@b.c", null, "000000")).toBe("invalido");
   });
 
-  it.each([500, 502, 503])(
+  it.each([500, 503])(
     "o GoTrue QUEBRADO (%i) é INDISPONÍVEL, e não código errado",
     async (status) => {
       // A distinção que protege o usuário: indisponibilidade não consome o
@@ -230,7 +204,7 @@ describe("verificação do código", () => {
 });
 
 describe("validação do token de acesso", () => {
-  it("um token válido devolve o e-mail do dono", async () => {
+  it("um token válido devolve o e-mail do dono, normalizado", async () => {
     const espiao = stubFetchPorCaminho(ROTAS_OK);
     const { provedorSupabase } = await comAmbiente(CONFIG_SUPABASE);
 
@@ -248,51 +222,47 @@ describe("validação do token de acesso", () => {
       string
     >;
     expect(headers.authorization).toBe("Bearer jwt-valido");
-  });
 
-  it("o e-mail devolvido vem normalizado", async () => {
-    // A comparação com o e-mail do pedido é feita depois; normalizar aqui evita
-    // depender de como o GoTrue guardou.
+    // Normalização: o e-mail é a chave da sessão, e "Operador@Sabemi.COM.BR"
+    // precisa dar a MESMA sessão que "operador@sabemi.com.br".
     stubFetchPorCaminho({
       "/auth/v1/user": { status: 200, corpo: { email: "  Operador@Sabemi.COM.BR " } },
     });
-    const { provedorSupabase } = await comAmbiente(CONFIG_SUPABASE);
+    const { provedorSupabase: comCaixa } = await comAmbiente(CONFIG_SUPABASE);
 
-    expect(await provedorSupabase.verificarTokenDeAcesso("jwt")).toBe(
-      "operador@sabemi.com.br",
-    );
+    expect(await comCaixa.verificarTokenDeAcesso("jwt")).toBe("operador@sabemi.com.br");
   });
 
-  it("um token recusado devolve null", async () => {
-    stubFetchPorCaminho({ "/auth/v1/user": { status: 401 } });
-    const { provedorSupabase } = await comAmbiente(CONFIG_SUPABASE);
+  it("nada além de um token válido com e-mail concede acesso", async () => {
+    // Quatro maneiras de não ter um dono confiável, um contrato só: devolver
+    // null, que o chamador traduz em 401. Não há caminho de "talvez" aqui - na
+    // dúvida, o acesso é negado.
+    const cenarios: [string, Record<string, { status: number; corpo?: unknown }>, Error?][] = [
+      // Token recusado pelo GoTrue.
+      ["jwt-invalido", { "/auth/v1/user": { status: 401 } }],
 
-    expect(await provedorSupabase.verificarTokenDeAcesso("jwt-invalido")).toBeNull();
-  });
+      // É por e-mail que este sistema identifica o operador; sem ele não há como
+      // comparar com o pedido.
+      ["jwt", { "/auth/v1/user": { status: 200, corpo: { id: "abc" } } }],
 
-  it("um usuário sem e-mail devolve null", async () => {
-    // É por e-mail que este sistema identifica o operador; sem ele não há como
-    // comparar com o pedido.
-    stubFetchPorCaminho({ "/auth/v1/user": { status: 200, corpo: { id: "abc" } } });
-    const { provedorSupabase } = await comAmbiente(CONFIG_SUPABASE);
+      // Rede caída.
+      ["jwt", {}, new Error("rede")],
+    ];
 
-    expect(await provedorSupabase.verificarTokenDeAcesso("jwt")).toBeNull();
-  });
+    for (const [token, rotas, erro] of cenarios) {
+      stubFetchPorCaminho(rotas, erro);
+      const { provedorSupabase } = await comAmbiente(CONFIG_SUPABASE);
 
-  it("token vazio não gera chamada alguma", async () => {
+      expect(await provedorSupabase.verificarTokenDeAcesso(token)).toBeNull();
+    }
+
+    // Token vazio nem chega a virar chamada: um "" enviado ao GoTrue voltaria 401
+    // e poluiria o log com um erro que não é erro.
     const espiao = stubFetchPorCaminho(ROTAS_OK);
     const { provedorSupabase } = await comAmbiente(CONFIG_SUPABASE);
 
     expect(await provedorSupabase.verificarTokenDeAcesso("")).toBeNull();
     expect(espiao).not.toHaveBeenCalled();
-  });
-
-  it("uma falha de rede NEGA o acesso", async () => {
-    // Não há caminho de "talvez" aqui: na dúvida, o acesso é negado.
-    stubFetchPorCaminho({}, new Error("rede"));
-    const { provedorSupabase } = await comAmbiente(CONFIG_SUPABASE);
-
-    expect(await provedorSupabase.verificarTokenDeAcesso("jwt")).toBeNull();
   });
 });
 

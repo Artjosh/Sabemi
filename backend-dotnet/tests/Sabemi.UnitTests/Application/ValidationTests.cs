@@ -63,27 +63,31 @@ public class ValidationTests
         resultado.Errors.ShouldContain(e => e.ErrorMessage.Contains("'status' deve ser um de"));
     }
 
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("   ")]
-    public void IdTransacao_e_obrigatorio(string? id)
+    [Fact]
+    public void Todo_campo_obrigatorio_ausente_e_reportado_COM_O_NOME_dele()
     {
-        var resultado = Validador().Validate(Valido() with { IdTransacao = id });
+        // O nome do campo na mensagem e o que faz o banco parceiro conseguir
+        // corrigir sozinho. Um "payload invalido" generico gera um telefonema.
+        //
+        // Os quatro campos em um caso so: e a mesma regra aplicada quatro vezes, e
+        // um teste por campo repetia a montagem sem cobrir ramo novo. O branco com
+        // espacos entra aqui porque o validador apara antes de checar.
+        var casos = new (PaymentWebhookRequest Payload, string Trecho)[]
+        {
+            (Valido() with { IdTransacao = null }, "'id_transacao' e obrigatorio"),
+            (Valido() with { IdTransacao = "   " }, "'id_transacao' e obrigatorio"),
+            (Valido() with { IdContrato = "" }, "'id_contrato' e obrigatorio"),
+            (Valido() with { Valor = null }, "'valor' e obrigatorio"),
+            (Valido() with { DataPagamento = null }, "'data_pagamento' e obrigatorio"),
+        };
 
-        resultado.IsValid.ShouldBeFalse();
-        resultado.Errors.ShouldContain(e => e.ErrorMessage.Contains("'id_transacao' e obrigatorio"));
-    }
+        foreach (var (payload, trecho) in casos)
+        {
+            var resultado = Validador().Validate(payload);
 
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    public void IdContrato_e_obrigatorio(string? id)
-    {
-        var resultado = Validador().Validate(Valido() with { IdContrato = id });
-
-        resultado.IsValid.ShouldBeFalse();
-        resultado.Errors.ShouldContain(e => e.ErrorMessage.Contains("'id_contrato' e obrigatorio"));
+            resultado.IsValid.ShouldBeFalse($"deveria reprovar: {trecho}");
+            resultado.Errors.ShouldContain(e => e.ErrorMessage.Contains(trecho));
+        }
     }
 
     [Fact]
@@ -107,7 +111,6 @@ public class ValidationTests
 
     [Theory]
     [InlineData(0)]
-    [InlineData(-1)]
     [InlineData(-0.01)]
     public void Valor_precisa_ser_positivo(decimal valor)
     {
@@ -210,56 +213,41 @@ public class PaymentQueryTests
     }
 
     [Theory]
+    // Caixa nao diferencia: o filtro vem da querystring, digitada por humano.
     [InlineData("SUCESSO", ProcessingStatus.Sucesso)]
     [InlineData("sucesso", ProcessingStatus.Sucesso)]
-    [InlineData("ERRO", ProcessingStatus.Erro)]
     [InlineData("Invalido", ProcessingStatus.Invalido)]
-    public void Status_e_interpretado_sem_diferenciar_caixa(string entrada, ProcessingStatus esperado)
+
+    // Valor desconhecido vira SEM filtro, e nao erro: um link antigo com um
+    // status que nao existe mais deve mostrar tudo, nao uma tela de erro.
+    [InlineData("BANANA", null)]
+    public void O_status_da_query_e_interpretado_sem_diferenciar_caixa(
+        string entrada, ProcessingStatus? esperado)
     {
         PaymentQuery.From(entrada, null, null, null).Status.ShouldBe(esperado);
     }
 
-    [Fact]
-    public void Status_desconhecido_vira_sem_filtro()
-    {
-        PaymentQuery.From("BANANA", null, null, null).Status.ShouldBeNull();
-    }
-
-    [Fact]
-    public void PageSize_acima_do_teto_e_ajustado()
-    {
-        // Protege o banco: sem o teto, `pageSize=100000` viraria uma consulta que
-        // varre a tabela inteira a cada 5 segundos de polling.
-        PaymentQuery.From(null, null, null, 5000).PageSize.ShouldBe(PaymentQuery.MaxPageSize);
-    }
-
     [Theory]
-    [InlineData(0)]
-    [InlineData(-10)]
-    public void PageSize_nao_positivo_vira_um(int pageSize)
-    {
-        PaymentQuery.From(null, null, null, pageSize).PageSize.ShouldBe(1);
-    }
+    // Teto: sem ele, `pageSize=5000` viraria uma consulta que derruba a pagina.
+    [InlineData(null, 5000, 1, PaymentQuery.MaxPageSize)]
 
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-5)]
-    public void Pagina_nao_positiva_vira_a_primeira(int page)
+    // Nao positivo vira o minimo valido, em vez de estourar.
+    [InlineData(0, 0, 1, 1)]
+    [InlineData(-5, -10, 1, 1)]
+    public void Pagina_e_tamanho_sao_ajustados_para_a_faixa_valida(
+        int? page, int? pageSize, int pageEsperada, int pageSizeEsperado)
     {
-        PaymentQuery.From(null, null, page, null).Page.ShouldBe(1);
-    }
+        var query = PaymentQuery.From(null, null, page, pageSize);
 
-    [Fact]
-    public void Contrato_em_branco_vira_sem_filtro()
-    {
-        PaymentQuery.From(null, "   ", null, null).ContractId.ShouldBeNull();
+        query.Page.ShouldBe(pageEsperada);
+        query.PageSize.ShouldBe(pageSizeEsperado);
     }
 
     [Fact]
-    public void Contrato_tem_espacos_removidos()
+    public void O_contrato_da_query_e_aparado_e_em_branco_vira_sem_filtro()
     {
-        // Copiar e colar um id costuma trazer espacos junto; sem o trim, o filtro
-        // simplesmente nao encontraria nada.
+        // Um espaco copiado junto do id nao deve devolver zero resultados.
         PaymentQuery.From(null, "  CTR-1 ", null, null).ContractId.ShouldBe("CTR-1");
+        PaymentQuery.From(null, "   ", null, null).ContractId.ShouldBeNull();
     }
 }

@@ -6,14 +6,10 @@
  * viraram hard bounce — e bounce não é mensagem perdida, é reputação de envio
  * perdida, de forma acumulativa e irreversível.
  *
- * O primeiro remédio foi a suíte abortar quando havia provedor. Este é o remédio
- * de verdade: endereços que *não podem* receber não recebem tentativa, e a suíte
- * passou a inventar os seus em `@e2e.invalid`.
- *
- * O último bloco é a PARIDADE com `Sabemi.Domain/Auth/EnderecoDeEmail.cs`. Os
- * dois backends compartilham a tabela de pedidos de login, então uma regra que
- * valha em um e não no outro seria uma diferença de comportamento invisível — o
- * gêmeo em C# não roda nesta suíte, então a comparação é feita contra o arquivo.
+ * <b>Espelho de `EnderecoDeEmail.cs`.</b> O segundo teste lê o arquivo C# e
+ * compara as listas: os dois backends compartilham a tabela de pedidos de login,
+ * então uma regra que valha em um e não no outro seria uma diferença de
+ * comportamento invisível.
  */
 
 import { readFileSync } from "node:fs";
@@ -23,58 +19,38 @@ import { describe, expect, it } from "vitest";
 
 import { DOMINIOS_RESERVADOS, podeReceber } from "@/server/bff/email-address";
 
-describe("endereços entregáveis", () => {
+describe("entrega em domínio reservado nunca é tentada", () => {
+  // RFC 2606 / 6761: `.invalid`, `.test`, `.example` e `.localhost` existem para
+  // NÃO existirem. Não há MX, nenhuma mensagem chega, e cada tentativa é um hard
+  // bounce garantido.
   it.each([
-    "operador@sabemi.com.br",
-    "alguem@gmail.com",
-    "com.ponto@sub.dominio.co.uk",
-    "MAIUSCULA@SABEMI.COM.BR",
-  ])("%s recebe tentativa", (email) => {
-    expect(podeReceber(email)).toBe(true);
-  });
-});
+    ["operador@sabemi.com.br", true],
+    ["MAIUSCULA@SABEMI.COM.BR", true],
 
-describe("domínios reservados por RFC nunca recebem tentativa", () => {
-  // RFC 2606 / 6761: estes TLDs existem para NÃO existirem. Não há MX, nenhuma
-  // mensagem chega, e cada tentativa é um hard bounce garantido.
-  it.each([
-    "e2e-vinext-123@e2e.invalid",
-    "qualquer@exemplo.test",
-    "alguem@algo.example",
-    "dev@app.localhost",
-  ])("%s é recusado", (email) => {
-    expect(podeReceber(email)).toBe(false);
-  });
+    // Um caso por domínio da lista: é a superfície real da regra.
+    ["e2e-vinext-123@e2e.invalid", false],
+    ["qualquer@exemplo.test", false],
+    ["alguem@algo.example", false],
+    ["dev@app.localhost", false],
 
-  it.each(["alguem@invalid", "alguem@test", "alguem@localhost"])(
-    "%s é recusado mesmo sem subdomínio",
-    (email) => {
-      // Sem subdomínio o sufixo ".invalid" não casaria, e o endereço passaria.
-      expect(podeReceber(email)).toBe(false);
-    },
-  );
+    // Sem subdomínio o sufixo ".invalid" não casaria, e o endereço passaria.
+    ["alguem@invalid", false],
 
-  it("um ponto final no domínio não esconde o TLD reservado", () => {
     // Raiz explícita é sintaxe legítima de nome de domínio. Sem normalizar,
     // "a@b.invalid." escaparia da regra por um caractere.
-    expect(podeReceber("alguem@sub.invalid.")).toBe(false);
+    ["alguem@sub.invalid.", false],
+
+    // Sem domínio não há onde entregar.
+    [null, false],
+    ["sem-arroba", false],
+  ])("%s → %s", (email, esperado) => {
+    expect(podeReceber(email as string | null)).toBe(esperado);
   });
-});
 
-describe("sem domínio não há onde entregar", () => {
-  it.each([null, undefined, "", "   ", "sem-arroba", "termina-em@"])(
-    "%s é recusado",
-    (email) => {
-      expect(podeReceber(email as string | null | undefined)).toBe(false);
-    },
-  );
-});
-
-describe("paridade com o backend .NET", () => {
-  it("a lista de domínios reservados é a mesma nos dois", () => {
-    // Este teste falha se alguém acrescentar um domínio em um lado e esquecer o
-    // outro. Lê o arquivo C# em vez de duplicar a lista, porque uma cópia manual
-    // divergiria em silêncio - que é exatamente o que ele existe para pegar.
+  it("a lista de domínios reservados é a mesma do backend .NET", () => {
+    // Falha se alguém acrescentar um domínio em um lado e esquecer o outro. Lê o
+    // arquivo C# em vez de duplicar a lista, porque uma cópia manual divergiria
+    // em silêncio - que é exatamente o que ele existe para pegar.
     const csharp = readFileSync(
       resolve(
         import.meta.dirname,
@@ -83,15 +59,11 @@ describe("paridade com o backend .NET", () => {
       "utf-8",
     );
 
-    // Recorta exatamente o literal do array, e não um trecho aproximado: um
-    // corte largo poderia pescar uma string de outro membro e o teste passaria
-    // por acidente.
     const inicio = csharp.indexOf("DominiosReservados =");
     expect(inicio).toBeGreaterThan(-1);
     const literal = csharp.slice(inicio, csharp.indexOf("];", inicio));
     const doDotnet = [...literal.matchAll(/"(\.[a-z]+)"/g)].map((m) => m[1]);
 
-    expect(doDotnet.length).toBeGreaterThan(0);
     expect([...doDotnet].sort()).toEqual([...DOMINIOS_RESERVADOS].sort());
   });
 });

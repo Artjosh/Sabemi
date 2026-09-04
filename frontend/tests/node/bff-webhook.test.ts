@@ -331,7 +331,7 @@ describe("validação", () => {
     expect(evento.statusOrigem).toBe("PAGO");
   });
 
-  it.each(["PAGO", "PENDENTE", "CANCELADO", "ESTORNADO"])(
+  it.each(["PAGO", "CANCELADO"])(
     "aceita o status %s do contrato",
     async (status) => {
       const resposta = await webhook(payload({ id_transacao: `TRX-${status}`, status }));

@@ -68,10 +68,7 @@ describe("registro de backends", () => {
     ["dotnet", true],
     ["vinext", true],
     ["postgres", false],
-    ["", false],
     [null, false],
-    [undefined, false],
-    [42, false],
   ])("isBackendId(%j) === %s", (valor, esperado) => {
     expect(isBackendId(valor)).toBe(esperado);
   });

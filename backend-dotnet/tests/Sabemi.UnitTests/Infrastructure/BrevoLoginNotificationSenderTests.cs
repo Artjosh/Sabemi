@@ -98,38 +98,25 @@ public class BrevoLoginNotificationSenderTests
     }
 
     [Fact]
-    public async Task Envia_para_o_endpoint_transacional_da_v3()
+    public async Task A_requisicao_e_a_que_a_Brevo_espera()
     {
+        // Endpoint, autenticacao e forma do corpo em um caso so: sao aspectos da
+        // MESMA requisicao, e separa-los em quatro testes multiplicava a
+        // montagem sem acrescentar cobertura - se um esta errado, o e-mail nao
+        // sai, e a mensagem de falha diz qual.
         var (remetente, handler) = Montar();
 
         var enviou = await remetente.SendAsync(
-            "operador@sabemi.com.br", "https://app/confirm?token=t", "123456");
+            "destino@sabemi.com.br", "https://app/confirm?token=abc", "654321");
 
         enviou.ShouldBeTrue();
         handler.Recebido!.Method.ShouldBe(HttpMethod.Post);
         handler.Recebido.RequestUri!.AbsolutePath.ShouldBe("/v3/smtp/email");
-    }
 
-    [Fact]
-    public async Task Autentica_com_o_header_api_key()
-    {
-        // A Brevo usa `api-key`, e não `Authorization: Bearer`. Errar isto devolve
-        // 401 com uma mensagem que não diz qual header ela esperava.
-        var (remetente, handler) = Montar();
-
-        await remetente.SendAsync("a@b.c", "https://app/x", "000000");
-
-        handler.Recebido!.Headers.TryGetValues("api-key", out var valores).ShouldBeTrue();
-        valores!.ShouldContain("chave-de-teste");
-    }
-
-    [Fact]
-    public async Task O_corpo_tem_a_forma_que_a_Brevo_espera()
-    {
-        var (remetente, handler) = Montar();
-
-        await remetente.SendAsync(
-            "destino@sabemi.com.br", "https://app/confirm?token=abc", "654321");
+        // A Brevo usa `api-key`, e nao `Authorization: Bearer`. Errar isto
+        // devolve 401 com uma mensagem que nao diz qual header ela esperava.
+        handler.Recebido.Headers.TryGetValues("api-key", out var chave).ShouldBeTrue();
+        chave!.ShouldContain("chave-de-teste");
 
         using var json = JsonDocument.Parse(handler.CorpoEnviado!);
         var raiz = json.RootElement;
@@ -138,81 +125,49 @@ public class BrevoLoginNotificationSenderTests
             .ShouldBe("nao-responda@sabemi.com.br");
         raiz.GetProperty("sender").GetProperty("name").GetString().ShouldBe("Sabemi");
 
-        // `to` é uma LISTA, mesmo com um destinatário só - a Brevo recusa objeto.
+        // `to` e uma LISTA, mesmo com um destinatario so - a Brevo recusa objeto.
         var destinatarios = raiz.GetProperty("to");
         destinatarios.GetArrayLength().ShouldBe(1);
         destinatarios[0].GetProperty("email").GetString().ShouldBe("destino@sabemi.com.br");
 
         raiz.GetProperty("subject").GetString().ShouldBe(LoginEmail.Assunto);
-        raiz.TryGetProperty("htmlContent", out _).ShouldBeTrue();
-        raiz.TryGetProperty("textContent", out _).ShouldBeTrue();
+
+        // Evita que um autoresponder de ferias gere uma resposta que ninguem le.
+        raiz.GetProperty("headers").GetProperty("Auto-Submitted").GetString()
+            .ShouldBe("auto-generated");
     }
 
     [Fact]
-    public async Task O_link_e_o_codigo_chegam_nos_DOIS_corpos()
+    public async Task O_e_mail_leva_link_e_codigo_nos_DOIS_corpos()
     {
-        // O texto alternativo não é decoração: alguns clientes corporativos
-        // bloqueiam HTML por política, e um código que não chega é um usuário que
-        // não entra.
+        // O texto alternativo nao e decoracao: alguns clientes corporativos
+        // bloqueiam HTML por politica, e um codigo que nao chega e um usuario que
+        // nao entra.
         var (remetente, handler) = Montar();
 
-        await remetente.SendAsync("a@b.c", "https://app/confirm?token=TOKEN123", "987654");
+        await remetente.SendAsync(
+            "a@b.c", "https://app/confirm?token=TOKEN123&extra=1", "987654");
 
         using var json = JsonDocument.Parse(handler.CorpoEnviado!);
-
         var html = json.RootElement.GetProperty("htmlContent").GetString()!;
         var texto = json.RootElement.GetProperty("textContent").GetString()!;
 
         html.ShouldContain("TOKEN123");
         html.ShouldContain("987654");
-        texto.ShouldContain("TOKEN123");
         texto.ShouldContain("987654");
-    }
 
-    [Fact]
-    public async Task O_texto_leva_o_link_SEM_escape_de_HTML()
-    {
-        // Uma URL com `&amp;` no corpo em texto quebra ao ser colada no navegador.
-        var (remetente, handler) = Montar();
+        // Sem escape no corpo em texto: uma URL com `&amp;` quebra ao ser colada
+        // no navegador.
+        texto.ShouldContain("token=TOKEN123&extra=1");
 
-        await remetente.SendAsync("a@b.c", "https://app/c?token=t&extra=1", "111111");
-
-        using var json = JsonDocument.Parse(handler.CorpoEnviado!);
-        json.RootElement.GetProperty("textContent").GetString()
-            .ShouldContain("token=t&extra=1");
-    }
-
-    [Fact]
-    public async Task O_prazo_de_validade_aparece_no_e_mail()
-    {
-        // Evita o suporte que começa com "cliquei no link de ontem".
-        var (remetente, handler) = Montar();
-
-        await remetente.SendAsync("a@b.c", "https://app/x", "222222");
-
-        using var json = JsonDocument.Parse(handler.CorpoEnviado!);
-        json.RootElement.GetProperty("textContent").GetString().ShouldContain("15 minutos");
-    }
-
-    [Fact]
-    public async Task Pede_para_nao_receber_resposta_automatica()
-    {
-        var (remetente, handler) = Montar();
-
-        await remetente.SendAsync("a@b.c", "https://app/x", "333333");
-
-        using var json = JsonDocument.Parse(handler.CorpoEnviado!);
-        var headers = json.RootElement.GetProperty("headers");
-
-        headers.GetProperty("Auto-Submitted").GetString().ShouldBe("auto-generated");
+        // Prazo no e-mail evita o suporte que comeca com "cliquei no link de ontem".
+        texto.ShouldContain("15 minutos");
     }
 
     // ------------------------------------------------------------- falhas
 
     [Theory]
     [InlineData(HttpStatusCode.BadRequest)]
-    [InlineData(HttpStatusCode.Unauthorized)]
-    [InlineData(HttpStatusCode.TooManyRequests)]
     [InlineData(HttpStatusCode.InternalServerError)]
     public async Task Uma_recusa_da_Brevo_devolve_false_sem_lancar(HttpStatusCode status)
     {

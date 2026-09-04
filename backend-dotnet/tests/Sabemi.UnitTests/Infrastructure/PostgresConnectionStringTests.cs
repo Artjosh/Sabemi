@@ -28,7 +28,7 @@ public class PostgresConnectionStringTests
         => new(PostgresConnectionString.Resolver(configuracao));
 
     [Fact]
-    public void Traduz_uma_URL_completa()
+    public void Traduz_uma_URL_completa_e_aplica_os_padroes()
     {
         var conexao = Resolver(Ambiente(
             ("DATABASE_URL", "postgresql://sabemi_app:senha123@db.exemplo.com:6543/postgres")));
@@ -38,119 +38,57 @@ public class PostgresConnectionStringTests
         conexao.Database.ShouldBe("postgres");
         conexao.Username.ShouldBe("sabemi_app");
         conexao.Password.ShouldBe("senha123");
+
+        // Sem porta e sem banco: os padroes do PostgreSQL. O esquema `postgres://`
+        // tambem vale - e o que a Supabase entrega no painel.
+        var minima = Resolver(Ambiente(("DATABASE_URL", "postgres://u:p@localhost")));
+        minima.Port.ShouldBe(5432);
+        minima.Database.ShouldBe("postgres");
+        minima.Username.ShouldBe("u");
     }
 
     [Fact]
-    public void Aceita_o_esquema_postgres_alem_de_postgresql()
+    public void Usuario_e_senha_percent_encoded_sao_DECODIFICADOS()
     {
-        // Os dois aparecem no painel do Supabase, dependendo de onde se copia.
-        var conexao = Resolver(Ambiente(
-            ("DATABASE_URL", "postgres://u:p@localhost/postgres")));
+        // A senha que a Supabase gera costuma ter `@`, `:` e `/`, e o usuario do
+        // pooler tem um `@` no meio do nome. Sem decodificar, a autenticacao falha
+        // com "password authentication failed" - que aponta para o lugar errado.
+        var conexao = Resolver(Ambiente((
+            "DATABASE_URL",
+            "postgresql://postgres.abcdefgh%40pooler:se%40nha%3Aforte%2F1@db.exemplo.com/postgres")));
 
-        conexao.Username.ShouldBe("u");
-    }
-
-    [Fact]
-    public void Porta_ausente_vira_5432()
-    {
-        var conexao = Resolver(Ambiente(("DATABASE_URL", "postgresql://u:p@localhost/postgres")));
-
-        conexao.Port.ShouldBe(5432);
-    }
-
-    [Fact]
-    public void Banco_ausente_vira_postgres()
-    {
-        var conexao = Resolver(Ambiente(("DATABASE_URL", "postgresql://u:p@localhost")));
-
-        conexao.Database.ShouldBe("postgres");
-    }
-
-    [Fact]
-    public void Senha_percent_encoded_e_DECODIFICADA()
-    {
-        // O Supabase gera senhas com caractere especial, e elas chegam
-        // percent-encoded na URL. Passá-las sem decodificar produz uma falha que
-        // parece credencial errada - e a pessoa vai conferir a senha no painel,
-        // onde ela está certa.
-        var conexao = Resolver(Ambiente(
-            ("DATABASE_URL", "postgresql://u:se%40nha%3Aforte%2F1@db.exemplo.com/postgres")));
-
+        conexao.Username.ShouldBe("postgres.abcdefgh@pooler");
         conexao.Password.ShouldBe("se@nha:forte/1");
     }
 
-    [Fact]
-    public void Usuario_percent_encoded_tambem()
-    {
-        var conexao = Resolver(Ambiente(
-            ("DATABASE_URL", "postgresql://postgres.abcdefgh%40pooler:p@db.exemplo.com/postgres")));
-
-        conexao.Username.ShouldBe("postgres.abcdefgh@pooler");
-    }
-
-    // ------------------------------------------------------------------- SSL
-
-    [Fact]
-    public void Host_REMOTO_sem_sslmode_ainda_exige_TLS()
-    {
-        // A decisão mais importante deste arquivo. Uma URL remota sem `sslmode`
-        // não pode resultar em conexão em claro pela internet: falhar pedindo TLS
-        // é recuperável, trafegar credenciais em claro não.
-        var conexao = Resolver(Ambiente(
-            ("DATABASE_URL", "postgresql://u:p@db.exemplo.com/postgres")));
-
-        conexao.SslMode.ShouldBe(SslMode.Require);
-    }
-
     [Theory]
-    [InlineData("localhost")]
-    [InlineData("127.0.0.1")]
-    [InlineData("postgres")]
-    public void Host_LOCAL_sem_sslmode_nao_exige_TLS(string host)
-    {
-        // O Postgres do Compose não tem certificado. Exigir TLS aqui impediria a
-        // stack de subir - e o tráfego não sai da máquina.
-        var conexao = Resolver(Ambiente(("DATABASE_URL", $"postgresql://u:p@{host}/postgres")));
+    // Host remoto sem `sslmode` ainda exige TLS: trafegar credencial de banco em
+    // claro pela internet nao pode depender de alguem lembrar do parametro.
+    [InlineData("db.exemplo.com", null, SslMode.Require, true)]
 
-        conexao.SslMode.ShouldBe(SslMode.Prefer);
-    }
+    // Local nao exige: dentro da rede do Docker nao ha o que interceptar, e
+    // exigir TLS ali quebraria o desenvolvimento sem ganho.
+    [InlineData("localhost", null, SslMode.Prefer, false)]
+    [InlineData("postgres", null, SslMode.Prefer, false)]
 
-    [Theory]
-    [InlineData("disable", SslMode.Disable)]
-    [InlineData("prefer", SslMode.Prefer)]
-    [InlineData("require", SslMode.Require)]
-    [InlineData("verify-full", SslMode.VerifyFull)]
-    public void O_sslmode_da_URL_e_respeitado(string parametro, SslMode esperado)
+    // O parametro explicito vence em qualquer direcao.
+    [InlineData("db.exemplo.com", "disable", SslMode.Disable, false)]
+    [InlineData("db.exemplo.com", "require", SslMode.Require, true)]
+
+    // `verify-full` NAO confia cegamente: quem pede verificacao do certificado
+    // quer a verificacao, e nao o oposto dela.
+    [InlineData("db.exemplo.com", "verify-full", SslMode.VerifyFull, false)]
+    public void O_TLS_e_decidido_pelo_host_e_pelo_sslmode(
+        string host, string? sslmode, SslMode esperado, bool confiaNoCertificado)
     {
-        var conexao = Resolver(Ambiente(
-            ("DATABASE_URL", $"postgresql://u:p@db.exemplo.com/postgres?sslmode={parametro}")));
+        var url = $"postgresql://u:p@{host}/postgres"
+            + (sslmode is null ? "" : $"?sslmode={sslmode}");
+
+        var conexao = Resolver(Ambiente(("DATABASE_URL", url)));
 
         conexao.SslMode.ShouldBe(esperado);
+        conexao.TrustServerCertificate.ShouldBe(confiaNoCertificado);
     }
-
-    [Fact]
-    public void Require_confia_no_certificado_do_servidor()
-    {
-        // `Require` significa "criptografe, mas não valide a cadeia". O
-        // certificado do Supabase é assinado por uma CA que não está no trust
-        // store da imagem, e sem isto a conexão falha com "remote certificate is
-        // invalid". Quem precisa de validação real usa `verify-full`.
-        var conexao = Resolver(Ambiente(
-            ("DATABASE_URL", "postgresql://u:p@db.exemplo.com/postgres?sslmode=require")));
-
-        conexao.TrustServerCertificate.ShouldBeTrue();
-    }
-
-    [Fact]
-    public void Verify_full_NAO_confia_cegamente()
-    {
-        var conexao = Resolver(Ambiente(
-            ("DATABASE_URL", "postgresql://u:p@db.exemplo.com/postgres?sslmode=verify-full")));
-
-        conexao.TrustServerCertificate.ShouldBeFalse();
-    }
-
-    // --------------------------------------------------------- precedência
 
     [Fact]
     public void A_DATABASE_URL_vence_o_ConnectionStrings_Postgres()
