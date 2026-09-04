@@ -35,3 +35,8 @@ docs/BRIEFING-DESIGN.md
 
 # Cache incremental do TypeScript: artefato de build, muda a cada `tsc`.
 *.tsbuildinfo
+
+# Skills de agente instaladas por integracoes de marketplace. Ferramental de
+# quem desenvolve, nao do projeto.
+.claude/
+.agents/
