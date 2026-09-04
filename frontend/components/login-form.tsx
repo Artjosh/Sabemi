@@ -143,15 +143,24 @@ export function LoginForm() {
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center gap-6 px-4 py-10">
-      <header className="flex flex-col items-center gap-3 text-center">
-        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-brand text-white">
-          <i className="bi bi-shield-lock-fill text-xl" aria-hidden="true" />
+      <header className="flex flex-col items-center gap-4 text-center">
+        {/* O halo atras da marca e o unico ornamento da tela. Ele existe porque
+          o login e a primeira coisa que alguem ve do sistema, e um card cinza
+          centrado em fundo cinza nao diz nada sobre o produto. */}
+        <div className="relative">
+          <span
+            aria-hidden="true"
+            className="absolute -inset-5 rounded-full bg-brand/20 blur-2xl"
+          />
+          <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-brand text-brand-contrast shadow-lift">
+            <i className="bi bi-shield-lock-fill text-2xl" aria-hidden="true" />
+          </div>
         </div>
         <div>
-          <h1 className="text-xl font-semibold">Sabemi · Painel de Pagamentos</h1>
-          <p className="text-sm text-[color:var(--muted-foreground)]">
-            Acesso sem senha por link ou código
-          </p>
+          <h1 className="text-2xl font-semibold tracking-[-0.02em]">
+            Sabemi · Painel de Pagamentos
+          </h1>
+          <p className="mt-1 text-sm text-fg-muted">Acesso sem senha por link ou código</p>
         </div>
       </header>
 
@@ -161,7 +170,7 @@ export function LoginForm() {
         <BackendSwitcher />
       </div>
 
-      <Card>
+      <Card className="shadow-lift">
         {step === "email" ? (
           <>
             <CardHeader>
@@ -224,7 +233,7 @@ export function LoginForm() {
                   a aba esta trabalhando e que o link pode ser aberto em outro
                   aparelho. */}
               <div
-                className="flex items-center gap-3 rounded-lg border border-border-subtle bg-surface-muted px-4 py-3"
+                className="flex items-center gap-3 rounded-[var(--radius-control)] border border-brand/25 bg-brand-soft/60 px-4 py-3.5"
                 aria-live="polite"
               >
                 <span className="relative flex h-2.5 w-2.5 shrink-0">
@@ -234,8 +243,8 @@ export function LoginForm() {
                   <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-brand" />
                 </span>
                 <div className="min-w-0 text-sm">
-                  <p className="font-medium">Aguardando confirmação…</p>
-                  <p className="text-xs text-[color:var(--muted-foreground)]">
+                  <p className="font-semibold">Aguardando confirmação…</p>
+                  <p className="mt-0.5 text-xs text-fg-muted">
                     Pode abrir o link em outro aparelho — esta aba entra sozinha.
                   </p>
                 </div>
@@ -277,7 +286,7 @@ export function LoginForm() {
 
               <div className="flex items-center gap-3">
                 <Separator className="flex-1" />
-                <span className="text-xs uppercase tracking-wide text-[color:var(--muted-foreground)]">
+                <span className="text-xs uppercase tracking-wide text-fg-muted">
                   ou digite o código
                 </span>
                 <Separator className="flex-1" />
@@ -291,7 +300,7 @@ export function LoginForm() {
                   autoComplete="one-time-code"
                   placeholder="000000"
                   aria-label="Código de 6 dígitos"
-                  className="tabular text-center text-2xl font-semibold tracking-[0.4em]"
+                  className="tabular h-14 text-center text-3xl font-semibold tracking-[0.45em] indent-[0.45em]"
                   value={otp}
                   onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
                 />
@@ -315,7 +324,7 @@ export function LoginForm() {
         )}
       </Card>
 
-      <p className="text-center text-xs text-[color:var(--muted-foreground)]">
+      <p className="text-center text-xs leading-relaxed text-fg-muted">
         O token de sessão fica em cookie <code>httpOnly</code> — nunca acessível ao JavaScript.
       </p>
     </div>

@@ -30,14 +30,14 @@ export function DashboardGuard() {
 
   if (loading || !user) {
     return (
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-6">
-        <Skeleton className="h-12 w-full" />
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 p-6">
+        <Skeleton className="h-14 w-full rounded-[var(--radius-card)]" />
         <div className="flex gap-3">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-20 flex-1" />
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Skeleton key={i} className="h-24 flex-1 rounded-[var(--radius-card)]" />
           ))}
         </div>
-        <Skeleton className="h-96 w-full" />
+        <Skeleton className="h-96 w-full rounded-[var(--radius-card)]" />
       </div>
     );
   }

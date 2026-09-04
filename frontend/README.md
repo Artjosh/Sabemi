@@ -79,11 +79,28 @@ tests/
 
 ## Estilo: três tecnologias, três papéis
 
-- **Bootstrap** — apenas `bootstrap-grid.css`, para o esqueleto responsivo. O
-  Bootstrap completo traria um *reboot* que brigaria com o *preflight* do
-  Tailwind.
-- **Tailwind** — todo o estilo visual.
+- **Bootstrap** — `bootstrap-grid.css`, do qual usamos o grid, para o esqueleto
+  responsivo. O Bootstrap completo traria um *reboot* que brigaria com o
+  *preflight* do Tailwind.
+- **Tailwind** — todo o estilo visual, e o único dono do espaçamento.
 - **shadcn/ui** — componentes com comportamento (dialog, select, tooltip), sobre
   Radix, por acessibilidade de teclado e foco.
 
-A divisão está documentada em `app/globals.css`.
+`bootstrap-grid.css` também embarca a API de utilitários do Bootstrap, toda com
+`!important` e com nomes que colidem com os do Tailwind (`.p-5`, `.px-3`,
+`.mb-4`) — o que fazia o espaçamento do painel renderizar em valores que ninguém
+escreveu. `postcss.config.mjs` remove essas regras do bundle; o porquê está lá.
+
+Os ícones são servidos de `public/fonts/`, e não pelo `@font-face` que vem no
+CSS do `bootstrap-icons`: o `@import` perde a base do `url()` e a fonte dava 404
+— o que fazia **todos** os ícones caírem no mesmo glifo de fallback. Se algum
+ícone parecer errado, comece por aqui:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}
+" http://localhost:3000/fonts/bootstrap-icons.woff2
+```
+
+A divisão está documentada em `app/globals.css`, e as duas armadilhas — a
+colisoão de `!important` e a fonte que dava 404 — em
+[`docs/APRESENTACAO.md`](../docs/APRESENTACAO.md).

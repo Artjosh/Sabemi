@@ -17,9 +17,10 @@ export function HomeRedirect() {
   }, [loading, user, router]);
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center gap-3 p-6">
-      <Skeleton className="h-10 w-full" />
-      <Skeleton className="h-40 w-full" />
+    <div className="mx-auto flex min-h-screen w-full max-w-sm flex-col justify-center gap-3 p-6">
+      <Skeleton className="h-12 w-12 self-center rounded-2xl" />
+      <Skeleton className="h-4 w-2/3 self-center" />
+      <Skeleton className="h-52 w-full rounded-[var(--radius-card)]" />
     </div>
   );
 }

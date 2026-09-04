@@ -25,19 +25,23 @@ export const DialogContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
 >(({ className, children, ...props }, ref) => (
   <DialogPrimitive.Portal>
-    <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm" />
+    <DialogPrimitive.Overlay className="fixed inset-0 z-50 animate-fade-in bg-canvas/70 backdrop-blur-md" />
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
         "fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-2xl -translate-x-1/2 -translate-y-1/2",
-        "max-h-[85vh] overflow-y-auto rounded-[var(--radius-card)] border border-border-subtle bg-surface p-6 shadow-xl",
+        // `animate-pop-in` anima `scale` e opacidade. A centralizacao usa
+        // `translate`, que no Tailwind v4 e uma propriedade separada - por isso
+        // uma nao desfaz a outra.
+        "animate-pop-in",
+        "max-h-[85vh] overflow-y-auto rounded-[var(--radius-card)] border border-border-subtle bg-surface p-6 shadow-pop",
         className,
       )}
       {...props}
     >
       {children}
       <DialogPrimitive.Close
-        className="absolute right-4 top-4 rounded-md p-1 opacity-60 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-brand"
+        className="absolute right-4 top-4 rounded-md p-1.5 text-fg-muted transition-colors hover:bg-surface-muted hover:text-fg focus:outline-none focus:ring-2 focus:ring-brand"
         aria-label="Fechar"
       >
         <X className="h-4 w-4" />
@@ -48,7 +52,7 @@ export const DialogContent = React.forwardRef<
 DialogContent.displayName = "DialogContent";
 
 export function DialogHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("mb-4 flex flex-col gap-1 pr-8", className)} {...props} />;
+  return <div className={cn("mb-5 flex flex-col gap-1 pr-10", className)} {...props} />;
 }
 
 export const DialogTitle = React.forwardRef<
@@ -57,7 +61,7 @@ export const DialogTitle = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Title
     ref={ref}
-    className={cn("text-lg font-semibold leading-tight", className)}
+    className={cn("text-lg font-semibold leading-tight tracking-[-0.01em]", className)}
     {...props}
   />
 ));
@@ -67,10 +71,6 @@ export const DialogDescription = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Description>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Description>
 >(({ className, ...props }, ref) => (
-  <DialogPrimitive.Description
-    ref={ref}
-    className={cn("text-sm text-[color:var(--muted-foreground)]", className)}
-    {...props}
-  />
+  <DialogPrimitive.Description ref={ref} className={cn("text-sm text-fg-muted", className)} {...props} />
 ));
 DialogDescription.displayName = "DialogDescription";

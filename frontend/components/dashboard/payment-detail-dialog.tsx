@@ -10,7 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Alert, Separator, Skeleton, StatusBadge } from "@/components/ui/primitives";
+import { Alert, Skeleton, StatusBadge } from "@/components/ui/primitives";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ApiError, getContract, getPaymentDetail, requeuePayment } from "@/lib/api-client";
 import type { ContractStatusDto, PaymentEventDetailDto } from "@/lib/contracts";
@@ -161,7 +161,7 @@ export function PaymentDetailDialog({
             <div className="flex flex-wrap items-center gap-2">
               <StatusBadge status={evento.status_processamento} />
               {evento.status_origem ? (
-                <span className="text-xs text-[color:var(--muted-foreground)]">
+                <span className="text-xs text-fg-muted">
                   status do parceiro: <strong>{evento.status_origem}</strong>
                 </span>
               ) : null}
@@ -169,8 +169,12 @@ export function PaymentDetailDialog({
 
             {evento.erro ? (
               <Alert
-                tone={evento.status_processamento === "INVALIDO" ? "warning" : "error"}
-                icon="bi-exclamation-triangle-fill"
+                tone="error"
+                icon={
+                  evento.status_processamento === "INVALIDO"
+                    ? "bi-exclamation-triangle-fill"
+                    : "bi-x-octagon-fill"
+                }
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <p className="font-semibold">
@@ -245,7 +249,7 @@ export function PaymentDetailDialog({
               </Alert>
             ) : null}
 
-            <dl className="row gy-3 gx-3 text-sm">
+            <dl className="row g-0 overflow-hidden rounded-[var(--radius-control)] border border-border-subtle text-sm">
               <Field label="Contrato" value={evento.id_contrato ?? "—"} mono />
               <Field label="Valor" value={formatCurrency(evento.valor)} />
               <Field label="Data do pagamento" value={formatDateTime(evento.data_pagamento)} />
@@ -255,13 +259,11 @@ export function PaymentDetailDialog({
             </dl>
 
             {contrato ? (
-              <>
-                <Separator />
-                <section>
-                  <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[color:var(--muted-foreground)]">
-                    Estado do contrato
-                  </h4>
-                  <dl className="row gy-3 gx-3 text-sm">
+              <section>
+                <h4 className="mb-2.5 text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-fg-muted">
+                  Estado do contrato
+                </h4>
+                <dl className="row g-0 overflow-hidden rounded-[var(--radius-control)] border border-border-subtle text-sm">
                     <Field
                       label="Total liquidado"
                       value={formatCurrency(contrato.valor_total_liquidado)}
@@ -271,27 +273,23 @@ export function PaymentDetailDialog({
                       value={String(contrato.pagamentos_confirmados)}
                     />
                     <Field label="Situação" value={contrato.situacao} />
-                    <Field
-                      label="Última transação"
-                      value={contrato.ultima_transacao ?? "—"}
-                      mono
-                    />
-                  </dl>
-                </section>
-              </>
+                  <Field
+                    label="Última transação"
+                    value={contrato.ultima_transacao ?? "—"}
+                    mono
+                  />
+                </dl>
+              </section>
             ) : null}
 
-            <>
-              <Separator />
-              <section>
-                <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[color:var(--muted-foreground)]">
-                  Payload bruto recebido
-                </h4>
-                <pre className="max-h-64 overflow-auto rounded-lg bg-surface-muted p-3 text-xs leading-relaxed">
-                  <code>{prettyJson(evento.payload_bruto)}</code>
-                </pre>
-              </section>
-            </>
+            <section>
+              <h4 className="mb-2.5 text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-fg-muted">
+                Payload bruto recebido
+              </h4>
+              <pre className="max-h-64 overflow-auto rounded-[var(--radius-control)] border border-border-subtle bg-surface-muted p-4 text-xs leading-relaxed">
+                <code>{prettyJson(evento.payload_bruto)}</code>
+              </pre>
+            </section>
           </div>
         ) : null}
       </DialogContent>
@@ -301,9 +299,13 @@ export function PaymentDetailDialog({
 
 function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div className="col-6">
-      <dt className="text-xs text-[color:var(--muted-foreground)]">{label}</dt>
-      <dd className={mono ? "font-mono text-xs" : "tabular font-medium"}>{value}</dd>
+    // Duas colunas: os impares ficam a esquerda e levam a divisoria vertical;
+    // a partir do terceiro, todos levam a horizontal.
+    <div className="col-6 border-border-subtle px-3.5 py-2.5 odd:border-r [&:nth-child(n+3)]:border-t">
+      <dt className="text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-fg-muted">
+        {label}
+      </dt>
+      <dd className={mono ? "mt-1 font-mono text-xs" : "tabular mt-1 font-medium"}>{value}</dd>
     </div>
   );
 }

@@ -20,7 +20,7 @@ export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElemen
   return (
     <div
       className={cn(
-        "rounded-[var(--radius-card)] border border-border-subtle bg-surface shadow-sm",
+        "rounded-[var(--radius-card)] border border-border-subtle bg-surface shadow-card",
         className,
       )}
       {...props}
@@ -29,20 +29,20 @@ export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElemen
 }
 
 export function CardHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("flex flex-col gap-1 p-5 pb-3", className)} {...props} />;
+  return <div className={cn("flex flex-col gap-1.5 p-5 pb-4", className)} {...props} />;
 }
 
 export function CardTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
-  return <h3 className={cn("text-base font-semibold leading-tight", className)} {...props} />;
-}
-
-export function CardDescription({ className, ...props }: React.HTMLAttributes<HTMLParagraphElement>) {
   return (
-    <p
-      className={cn("text-sm text-[color:var(--muted-foreground)]", className)}
+    <h3
+      className={cn("text-[0.95rem] font-semibold leading-tight tracking-[-0.01em]", className)}
       {...props}
     />
   );
+}
+
+export function CardDescription({ className, ...props }: React.HTMLAttributes<HTMLParagraphElement>) {
+  return <p className={cn("text-sm leading-relaxed text-fg-muted", className)} {...props} />;
 }
 
 export function CardContent({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
@@ -55,17 +55,22 @@ export function CardFooter({ className, ...props }: React.HTMLAttributes<HTMLDiv
 
 // ------------------------------------------------------------------ Badge
 
+/**
+ * O anel de 1px na cor do estado, alem do fundo suave, e o que mantem o badge
+ * legivel nas duas faces do tema: no escuro os fundos "soft" sao escuros e, sem
+ * a borda, a pilula se dissolve no cartao.
+ */
 const badgeVariants = cva(
-  "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap",
+  "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[0.7rem] font-semibold leading-none whitespace-nowrap ring-1 ring-inset",
   {
     variants: {
       tone: {
-        neutral: "bg-state-neutral-soft text-state-neutral",
-        success: "bg-state-success-soft text-state-success",
-        error: "bg-state-error-soft text-state-error",
-        warning: "bg-state-warning-soft text-state-warning",
-        info: "bg-state-info-soft text-state-info",
-        brand: "bg-brand-soft text-brand-strong",
+        neutral: "bg-state-neutral-soft text-state-neutral ring-state-neutral/20",
+        success: "bg-state-success-soft text-state-success ring-state-success/25",
+        error: "bg-state-error-soft text-state-error ring-state-error/25",
+        warning: "bg-state-warning-soft text-state-warning ring-state-warning/25",
+        info: "bg-state-info-soft text-state-info ring-state-info/25",
+        brand: "bg-brand-soft text-brand-strong ring-brand/25",
       },
     },
     defaultVariants: { tone: "neutral" },
@@ -141,9 +146,13 @@ export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttribute
     <input
       ref={ref}
       className={cn(
-        "flex h-10 w-full rounded-lg border border-border-subtle bg-surface px-3 py-2 text-sm",
-        "placeholder:text-[color:var(--muted-foreground)]",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-0",
+        "flex h-10 w-full rounded-[var(--radius-control)] border border-border-subtle bg-surface px-3 py-2 text-sm",
+        "transition-[border-color,box-shadow] duration-150",
+        "placeholder:text-fg-muted/70",
+        "hover:border-border-strong",
+        // O anel substitui o outline global para o campo nao "pular" ao focar:
+        // um `box-shadow` nao ocupa espaco no layout.
+        "focus-visible:border-brand focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand/15",
         "disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
@@ -157,7 +166,7 @@ export function Label({ className, ...props }: React.LabelHTMLAttributes<HTMLLab
   return (
     <label
       className={cn(
-        "text-xs font-semibold uppercase tracking-wide text-[color:var(--muted-foreground)]",
+        "text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-fg-muted",
         className,
       )}
       {...props}
@@ -167,17 +176,20 @@ export function Label({ className, ...props }: React.LabelHTMLAttributes<HTMLLab
 
 // ------------------------------------------------------------------ Alert
 
-const alertVariants = cva("flex gap-3 rounded-lg border p-4 text-sm", {
-  variants: {
-    tone: {
-      info: "border-state-info/30 bg-state-info-soft text-state-info",
-      success: "border-state-success/30 bg-state-success-soft text-state-success",
-      error: "border-state-error/30 bg-state-error-soft text-state-error",
-      warning: "border-state-warning/30 bg-state-warning-soft text-state-warning",
+const alertVariants = cva(
+  "flex gap-3 rounded-[var(--radius-control)] border p-4 text-sm leading-relaxed",
+  {
+    variants: {
+      tone: {
+        info: "border-state-info/25 bg-state-info-soft text-state-info",
+        success: "border-state-success/25 bg-state-success-soft text-state-success",
+        error: "border-state-error/25 bg-state-error-soft text-state-error",
+        warning: "border-state-warning/25 bg-state-warning-soft text-state-warning",
+      },
     },
+    defaultVariants: { tone: "info" },
   },
-  defaultVariants: { tone: "info" },
-});
+);
 
 export interface AlertProps
   extends React.HTMLAttributes<HTMLDivElement>,
@@ -188,7 +200,9 @@ export interface AlertProps
 export function Alert({ className, tone, icon, children, ...props }: AlertProps) {
   return (
     <div role="alert" className={cn(alertVariants({ tone }), className)} {...props}>
-      {icon ? <i className={cn("bi", icon, "mt-0.5 shrink-0")} aria-hidden="true" /> : null}
+      {icon ? (
+        <i className={cn("bi", icon, "mt-px shrink-0 text-base leading-none")} aria-hidden="true" />
+      ) : null}
       <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
@@ -201,11 +215,29 @@ export function Alert({ className, tone, icon, children, ...props }: AlertProps)
  *
  * Preferivel a um spinner na tabela: preserva a altura das linhas e evita o
  * salto de layout quando os dados chegam.
+ *
+ * O brilho que atravessa e um gradiente animado, e nao o `animate-pulse` do
+ * Tailwind: o pulso faz o bloco inteiro escurecer e clarear junto, o que a
+ * cinco blocos empilhados parece a tela toda piscando. A varredura sugere
+ * carregamento sem competir com o resto da interface.
+ *
+ * O `data-slot` existe para o teste que verifica "a tela mostra o esqueleto
+ * durante a restauracao da sessao". Ele procurava pela classe `.animate-pulse`,
+ * o que amarrava um teste de COMPORTAMENTO ao nome de um utilitario do Tailwind:
+ * trocar a animacao derrubava o teste sem que nada tivesse quebrado de verdade.
+ * O atributo e um contrato estavel, e e a convencao que o proprio shadcn/ui
+ * adotou para o mesmo problema.
  */
 export function Skeleton({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn("animate-pulse rounded-md bg-surface-muted", className)}
+      data-slot="skeleton"
+      className={cn(
+        "animate-shimmer rounded-md bg-surface-muted",
+        "bg-[linear-gradient(100deg,transparent_35%,var(--color-border-subtle)_50%,transparent_65%)]",
+        "bg-[length:200%_100%]",
+        className,
+      )}
       aria-hidden="true"
       {...props}
     />
@@ -225,7 +257,12 @@ export function Table({ className, ...props }: React.TableHTMLAttributes<HTMLTab
 }
 
 export function TableHeader({ className, ...props }: React.HTMLAttributes<HTMLTableSectionElement>) {
-  return <thead className={cn("border-b border-border-subtle", className)} {...props} />;
+  return (
+    <thead
+      className={cn("border-y border-border-subtle bg-surface-muted/60", className)}
+      {...props}
+    />
+  );
 }
 
 export function TableBody({ className, ...props }: React.HTMLAttributes<HTMLTableSectionElement>) {
@@ -233,14 +270,19 @@ export function TableBody({ className, ...props }: React.HTMLAttributes<HTMLTabl
 }
 
 export function TableRow({ className, ...props }: React.HTMLAttributes<HTMLTableRowElement>) {
-  return <tr className={cn("transition-colors hover:bg-surface-muted", className)} {...props} />;
+  return (
+    <tr
+      className={cn("transition-colors duration-150 hover:bg-surface-muted", className)}
+      {...props}
+    />
+  );
 }
 
 export function TableHead({ className, ...props }: React.ThHTMLAttributes<HTMLTableCellElement>) {
   return (
     <th
       className={cn(
-        "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-[color:var(--muted-foreground)]",
+        "px-4 py-2.5 text-left text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-fg-muted",
         className,
       )}
       {...props}
@@ -249,7 +291,7 @@ export function TableHead({ className, ...props }: React.ThHTMLAttributes<HTMLTa
 }
 
 export function TableCell({ className, ...props }: React.TdHTMLAttributes<HTMLTableCellElement>) {
-  return <td className={cn("px-4 py-3 align-middle", className)} {...props} />;
+  return <td className={cn("px-4 py-3.5 align-middle", className)} {...props} />;
 }
 
 // -------------------------------------------------------------- Separator

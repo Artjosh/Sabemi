@@ -189,6 +189,6 @@ export const STATUS_LABELS: Record<ProcessingStatus, string> = {
   PROCESSANDO: "Processando",
   SUCESSO: "Sucesso",
   ERRO: "Erro",
-  INVALIDO: "Invalido",
+  INVALIDO: "Inválido",
   DUPLICADO: "Duplicado",
 };

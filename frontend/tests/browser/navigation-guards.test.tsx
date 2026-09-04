@@ -140,7 +140,9 @@ describe("proteção do dashboard", () => {
 
     await new Promise((r) => setTimeout(r, 100));
 
-    expect(container.querySelectorAll(".animate-pulse").length).toBeGreaterThan(0);
+    // Procura pelo `data-slot` do Skeleton, e nao pela classe da animacao: o
+    // que este teste afirma e que HA esqueleto, nao qual animacao ele usa.
+    expect(container.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0);
     expect(replaceMock).not.toHaveBeenCalled();
   });
 });

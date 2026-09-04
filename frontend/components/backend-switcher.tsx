@@ -71,52 +71,52 @@ export function BackendSwitcher() {
   if (backends.length === 0) return null;
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <span className="hidden text-[0.65rem] font-semibold uppercase tracking-wider text-[color:var(--muted-foreground)] sm:inline">
-          Backend
-        </span>
+    <div className="flex items-center gap-2">
+      <span className="hidden text-[0.65rem] font-semibold uppercase tracking-[0.1em] text-fg-muted sm:inline">
+        Backend
+      </span>
 
-        <div
-          className="flex rounded-full border border-border-subtle bg-surface p-1"
-          role="radiogroup"
-          aria-label="Selecionar backend"
-        >
-          {backends.map((backend) => {
-            const ativo = backend.id === active;
-            const carregando = switching === backend.id;
+      <div
+        className="flex rounded-full border border-border-subtle bg-surface p-1 shadow-card"
+        role="radiogroup"
+        aria-label="Selecionar backend"
+      >
+        {backends.map((backend) => {
+          const ativo = backend.id === active;
+          const carregando = switching === backend.id;
 
-            return (
-              <button
-                key={backend.id}
-                type="button"
-                role="radio"
-                aria-checked={ativo}
-                disabled={carregando}
-                onClick={() => void selecionar(backend.id)}
-                title={`${backend.description}${backend.online ? "" : " — fora do ar"}`}
+          return (
+            <button
+              key={backend.id}
+              type="button"
+              role="radio"
+              aria-checked={ativo}
+              disabled={carregando}
+              onClick={() => void selecionar(backend.id)}
+              title={`${backend.description}${backend.online ? "" : " — fora do ar"}`}
+              className={cn(
+                "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold",
+                "transition-[background-color,color] duration-200",
+                ativo
+                  ? "bg-brand text-brand-contrast shadow-card"
+                  : "text-fg-muted hover:bg-surface-muted hover:text-fg",
+                carregando && "opacity-60",
+              )}
+            >
+              <span
+                aria-hidden="true"
                 className={cn(
-                  "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors",
-                  ativo
-                    ? "bg-brand text-white shadow-sm"
-                    : "text-[color:var(--muted-foreground)] hover:text-[color:var(--foreground)]",
-                  carregando && "opacity-60",
+                  "h-1.5 w-1.5 rounded-full ring-2",
+                  backend.online
+                    ? "bg-state-success ring-state-success/25"
+                    : "bg-state-error ring-state-error/25",
                 )}
-              >
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    "h-1.5 w-1.5 rounded-full",
-                    backend.online ? "bg-state-success" : "bg-state-error",
-                  )}
-                />
-                {backend.label}
-              </button>
-            );
-          })}
-        </div>
+              />
+              {backend.label}
+            </button>
+          );
+        })}
       </div>
-
     </div>
   );
 }

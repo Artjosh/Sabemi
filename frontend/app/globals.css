@@ -19,17 +19,28 @@
  *                   Sao componentes deste repositorio (em `components/ui/`), nao
  *                   uma dependencia opaca: da para le-los e ajusta-los.
  *
- *   BOOTSTRAP     - entra apenas por `bootstrap-grid.css`, o build que contem SO
- *                   o sistema de grid (container/row/col, gutters, breakpoints) -
- *                   sem reboot, sem componentes, sem utilitarios. Zero conflito
- *                   com o preflight do Tailwind, verificavel abrindo o arquivo.
- *                   Usado no esqueleto responsivo do dashboard, onde o grid de
- *                   12 colunas expressa a intencao melhor do que uma pilha de
- *                   utilitarios. Mais `bootstrap-icons` para a iconografia de
- *                   dominio.
+ *   BOOTSTRAP     - entra por `bootstrap-grid.css`, do qual usamos o sistema de
+ *                   grid (container/row/col, gutters, breakpoints), no esqueleto
+ *                   responsivo do dashboard - onde o grid de 12 colunas expressa
+ *                   a intencao melhor do que uma pilha de utilitarios. Mais
+ *                   `bootstrap-icons` para a iconografia de dominio.
  *
  * Resumindo: Bootstrap cuida do ESQUELETO e dos ICONES, Tailwind da PELE,
  * shadcn/ui dos ORGAOS. Cada regra tem um dono unico.
+ *
+ * <b>Uma correcao importante.</b> Este comentario ja afirmou que
+ * `bootstrap-grid.css` traz "so o grid, sem utilitarios". E falso: o arquivo
+ * embarca tambem a API de utilitarios do Bootstrap - display, flex, `gap` e a
+ * escala inteira de margin/padding - toda ela com `!important`. Varios desses
+ * nomes existem no Tailwind com outro valor (`.p-5` e 3rem no Bootstrap e
+ * 1.25rem no Tailwind), e o `!important` vencia, entao quase todo espacamento
+ * do painel renderizava num numero que ninguem escreveu.
+ *
+ * O `layer(base)` do import abaixo NAO resolvia isso - camadas ordenam
+ * declaracoes normais, e uma declaracao `!important` vence qualquer normal em
+ * qualquer camada. Quem resolve e o corte em `postcss.config.mjs`, que remove
+ * do bundle as regras cujas declaracoes sao todas `!important` (o grid nao usa
+ * nenhuma). O `layer(base)` continua aqui porque ainda ordena o resto.
  */
 
 @import "tailwindcss";
@@ -39,6 +50,70 @@
 @import "bootstrap-icons/font/bootstrap-icons.css";
 
 /*
+ * A FONTE DOS ICONES, SERVIDA DE `public/` - e por que ela precisa disto.
+ * ---------------------------------------------------------------------
+ * O `bootstrap-icons.css` importado acima traz o proprio `@font-face`, com
+ * `src: url(./fonts/bootstrap-icons.woff2)`. Esse caminho e relativo AO ARQUIVO
+ * DELE, dentro de `node_modules` - e quem resolve o `@import` aqui e o PostCSS
+ * do Tailwind, que inlina o texto do CSS e perde a base do caminho.
+ *
+ * O resultado: o `url()` sobrevive intacto no bundle e passa a ser relativo ao
+ * CSS final (`/_next/static/css/index.HASH.css`), apontando para
+ * `/_next/static/css/fonts/bootstrap-icons.woff2` - que nao existe. O bundler
+ * nao emite o arquivo (nunca soube que ele era um asset) e nao reclama.
+ *
+ * A falha e a pior possivel de diagnosticar pelo sintoma: a fonte da 404, cada
+ * `.bi-*` cai no glifo de fallback, e TODOS os icones do painel aparecem
+ * identicos - o que se le como "escolheram o mesmo icone para tudo", e nao
+ * como "a fonte nao carregou".
+ *
+ * A correcao e declarar o `@font-face` aqui, com caminho absoluto a partir de
+ * `public/`, DEPOIS do import: duas declaracoes da mesma familia, e a ultima
+ * vence. A copia em `public/fonts/` acompanha `bootstrap-icons` 1.13.1.
+ *
+ * `public/` e o unico lugar que funciona igual nos tres caminhos de execucao:
+ * `vinext dev`, `vinext build` e a imagem Docker (que copia `public/` no
+ * estagio final). Um script de copia no `postinstall` nao serviria - o
+ * Dockerfile instala com `--ignore-scripts` e chama `vinext build` direto, sem
+ * passar pelo `prebuild`.
+ */
+@font-face {
+  font-family: bootstrap-icons;
+  font-display: block;
+  src: url("/fonts/bootstrap-icons.woff2") format("woff2");
+}
+
+/*
+ * UM TOKEN, DOIS TEMAS - por que `light-dark()` e nao um bloco duplicado.
+ * ----------------------------------------------------------------------
+ * A versao anterior declarava a paleta clara em `@theme` e repetia a escura
+ * inteira dentro de `@media (prefers-color-scheme: dark)`. Duas listas para as
+ * mesmas cores: acrescentar um token e lembrar de acrescenta-lo nos dois lugares
+ * - e o esquecimento nao quebra nada, so deixa uma cor errada no modo escuro.
+ *
+ * `light-dark()` resolve pelo `color-scheme` do elemento, entao cada cor e
+ * declarada UMA vez com as duas faces. E, como o `color-scheme` e uma
+ * propriedade CSS comum, trocar de tema vira trocar um atributo no <html> -
+ * sem classe `dark:` em cada utilitario e sem recarregar a pagina.
+ *
+ * Os utilitarios do Tailwind viram `var(--color-x)`, e os modificadores de
+ * opacidade (`bg-brand/10`) viram `color-mix(...)`: os dois resolvem em tempo de
+ * uso, ja com a face certa. Verificado compilando o arquivo.
+ */
+:root {
+  /* Segue o sistema. O `data-theme` abaixo sobrescreve quando o operador escolhe. */
+  color-scheme: light dark;
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+/*
  * Tokens do tema, expostos ao Tailwind v4 por @theme.
  *
  * As cores de situacao (sucesso/erro/aviso) sao tokens e nao classes soltas:
@@ -46,77 +121,157 @@
  * garante que as tres nunca saiam de sincronia.
  */
 @theme {
-  --color-surface: #ffffff;
-  --color-surface-muted: #f8fafc;
-  --color-border-subtle: #e2e8f0;
+  /* --- Superficies e texto ------------------------------------------- */
+  --color-canvas: light-dark(#eef1f6, #070910);
+  --color-surface: light-dark(#ffffff, #131822);
+  --color-surface-muted: light-dark(#f3f5f9, #1a2130);
+  --color-border-subtle: light-dark(#e3e8f0, #232c3c);
+  --color-border-strong: light-dark(#cbd4e1, #334054);
 
-  --color-brand: #0f766e;
-  --color-brand-strong: #115e59;
-  --color-brand-soft: #ccfbf1;
+  --color-fg: light-dark(#0b1220, #e8edf5);
+  --color-fg-muted: light-dark(#5c6779, #8d99ad);
 
-  --color-state-success: #15803d;
-  --color-state-success-soft: #dcfce7;
-  --color-state-error: #b91c1c;
-  --color-state-error-soft: #fee2e2;
-  --color-state-warning: #b45309;
-  --color-state-warning-soft: #fef3c7;
-  --color-state-info: #1d4ed8;
-  --color-state-info-soft: #dbeafe;
-  --color-state-neutral: #475569;
-  --color-state-neutral-soft: #f1f5f9;
+  /* --- Marca ---------------------------------------------------------- */
+  --color-brand: light-dark(#0d7f74, #2dd4bf);
+  --color-brand-strong: light-dark(#0a5f57, #5eead4);
+  --color-brand-soft: light-dark(#d5f4ef, #10403c);
+  /* Cor do texto sobre um fundo `bg-brand` solido, nas duas faces. */
+  --color-brand-contrast: light-dark(#ffffff, #04211f);
 
-  --radius-card: 0.875rem;
-}
+  /* --- Situacoes ------------------------------------------------------ */
+  --color-state-success: light-dark(#15803d, #4ade80);
+  --color-state-success-soft: light-dark(#dcfce7, #0f3520);
+  --color-state-error: light-dark(#c02626, #f87171);
+  --color-state-error-soft: light-dark(#fde8e8, #3d1618);
+  --color-state-warning: light-dark(#b45309, #fbbf24);
+  --color-state-warning-soft: light-dark(#fef3c7, #38260a);
+  --color-state-info: light-dark(#2563eb, #60a5fa);
+  --color-state-info-soft: light-dark(#dbeafe, #16264d);
+  --color-state-neutral: light-dark(#4c5769, #94a3b8);
+  --color-state-neutral-soft: light-dark(#eceff5, #1e2635);
 
-:root {
-  color-scheme: light;
-  --background: #f1f5f9;
-  --foreground: #0f172a;
-  --muted-foreground: #64748b;
+  /* --- Forma ---------------------------------------------------------- */
+  --radius-card: 1rem;
+  --radius-control: 0.625rem;
+
+  /*
+   * Elevacao em dois passos, e nao um `shadow-sm` em tudo.
+   *
+   * A sombra e sempre da MESMA cor (quase preta) nas duas faces: no escuro ela
+   * praticamente some, e quem separa o cartao do fundo passa a ser a borda -
+   * que e como interfaces escuras funcionam.
+   */
+  --shadow-card: 0 1px 2px 0 rgb(9 12 20 / 0.05), 0 10px 28px -20px rgb(9 12 20 / 0.28);
+  --shadow-lift:
+    0 2px 6px -1px rgb(9 12 20 / 0.08), 0 24px 48px -28px rgb(9 12 20 / 0.4);
+  --shadow-pop: 0 16px 56px -16px rgb(9 12 20 / 0.35);
+
+  /* --- Movimento ------------------------------------------------------ */
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --animate-shimmer: shimmer 1.6s linear infinite;
+  --animate-rise: rise 0.45s var(--ease-out-soft) both;
+  --animate-fade-in: fade-in 0.18s var(--ease-out-soft);
+  /*
+   * O `scale` e a `translate` sao propriedades CSS proprias (nao `transform`),
+   * e no Tailwind v4 os utilitarios `-translate-x-1/2` tambem usam `translate`.
+   * Por isso a entrada do dialogo pode animar `scale` sem desfazer a
+   * centralizacao - o que aconteceria se as duas disputassem `transform`.
+   */
+  --animate-pop-in: pop-in 0.2s var(--ease-out-soft);
+
+  @keyframes shimmer {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
+  }
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      translate: 0 6px;
+    }
+    to {
+      opacity: 1;
+      translate: none;
+    }
+  }
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      scale: 0.97;
+    }
+    to {
+      opacity: 1;
+      scale: 1;
+    }
+  }
 }
 
 /*
- * Tema escuro pela preferencia do sistema.
+ * Aliases dos nomes antigos.
  *
- * O painel e uma ferramenta de trabalho, usada por horas seguidas; respeitar a
- * preferencia do sistema evita a tela clara estourando numa sala escura.
+ * `--foreground` e `--muted-foreground` continuam existindo porque saem no
+ * `body` e sao herdados por tudo. Apontam para os tokens novos, entao ha uma
+ * unica definicao de cada cor - nao duas que podem divergir.
  */
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --background: #020617;
-    --foreground: #e2e8f0;
-    --muted-foreground: #94a3b8;
-
-    --color-surface: #0f172a;
-    --color-surface-muted: #1e293b;
-    --color-border-subtle: #1e293b;
-
-    --color-brand: #2dd4bf;
-    --color-brand-strong: #5eead4;
-    --color-brand-soft: #134e4a;
-
-    --color-state-success: #4ade80;
-    --color-state-success-soft: #14532d;
-    --color-state-error: #f87171;
-    --color-state-error-soft: #7f1d1d;
-    --color-state-warning: #fbbf24;
-    --color-state-warning-soft: #78350f;
-    --color-state-info: #60a5fa;
-    --color-state-info-soft: #1e3a8a;
-    --color-state-neutral: #94a3b8;
-    --color-state-neutral-soft: #1e293b;
-  }
+:root {
+  --background: var(--color-canvas);
+  --foreground: var(--color-fg);
+  --muted-foreground: var(--color-fg-muted);
 }
 
 body {
   margin: 0;
   min-height: 100vh;
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--color-canvas);
+  color: var(--color-fg);
   font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    "Inter var", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/*
+ * Luz de fundo.
+ *
+ * Duas manchas radiais fixas, muito diluidas, tiradas das cores da marca. E o
+ * que tira a tela do cinza chapado sem custar um pixel de contraste no
+ * conteudo: fica atras de tudo (`z-index: -1`) e nao intercepta clique.
+ *
+ * `color-mix` em vez de um rgba fixo para a mancha acompanhar o tema - no escuro
+ * a mesma regra produz um brilho, e nao uma nevoa clara.
+ */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      900px 480px at 8% -10%,
+      color-mix(in oklab, var(--color-brand) 14%, transparent),
+      transparent 68%
+    ),
+    radial-gradient(
+      760px 420px at 95% -6%,
+      color-mix(in oklab, var(--color-state-info) 10%, transparent),
+      transparent 66%
+    );
 }
 
 a {
@@ -133,6 +288,7 @@ a {
 :focus-visible {
   outline: 2px solid var(--color-brand);
   outline-offset: 2px;
+  border-radius: 4px;
 }
 
 /*
@@ -144,6 +300,30 @@ a {
  */
 .tabular {
   font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/*
+ * Numero de destaque dos cartoes de resumo.
+ *
+ * O `letter-spacing` negativo importa em tamanho grande: sem ele os digitos
+ * ficam frouxos e o numero perde a leitura de bloco unico.
+ */
+.metric {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.035em;
+  line-height: 1;
+}
+
+/*
+ * Barra de rolagem discreta.
+ *
+ * A padrao do Windows e larga e clara demais - dentro de um <pre> escuro com o
+ * payload bruto ela vira o elemento mais chamativo da tela.
+ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
 }
 
 /* Respeita quem pediu menos animacao no sistema. */

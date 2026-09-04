@@ -18,6 +18,15 @@ frontend/generated/
 .env.local
 !.env.example
 
+# Documentos de trabalho, nao de entrega.
+#
+# O HANDOFF e escrito para quem (ou o que) for retomar o codigo, e o briefing de
+# design para uma ferramenta de design - os dois falam de processo, nao do
+# sistema. Quem avalia le a APRESENTACAO, e e la que as decisoes e as armadilhas
+# que importam estao registradas.
+docs/HANDOFF.md
+docs/BRIEFING-DESIGN.md
+
 # Diversos
 *.log
 .DS_Store

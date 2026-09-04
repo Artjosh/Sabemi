@@ -1,14 +1,14 @@
 "use client";
 
-import { Card, CardContent, Skeleton } from "@/components/ui/primitives";
+import { Card, Skeleton } from "@/components/ui/primitives";
 import type { PaymentSummaryDto } from "@/lib/contracts";
 import { cn } from "@/lib/utils";
 
 /**
- * Cartoes de totais no topo do dashboard.
+ * Faixa de totais no topo do dashboard.
  *
  * <b>Quais estados aparecem, e por que estes.</b> A task pede filtros por
- * "Sucesso" e "Erro". Os cartoes vao alem porque o processamento e assincrono e
+ * "Sucesso" e "Erro". Os totais vao alem porque o processamento e assincrono e
  * um operador precisa distinguir tres situacoes que um par sucesso/erro
  * esconderia:
  *
@@ -20,6 +20,18 @@ import { cn } from "@/lib/utils";
  *
  * "Na fila" agrega dois estados de proposito: para quem opera, "esperando" e
  * "rodando agora" levam a mesma conclusao - ha trabalho em andamento.
+ *
+ * <b>Um cartao, cinco segmentos - e nao cinco cartoes.</b> Cinco caixas soltas
+ * com borda e sombra proprias davam a cinco numeros relacionados a aparencia de
+ * cinco widgets independentes, e o olho tinha de atravessar cinco molduras para
+ * comparar dois valores. Aqui a moldura e uma so e os segmentos se separam por
+ * uma linha de 1px: comparar vira ler uma linha.
+ *
+ * <b>A barra de cor no topo</b> substitui o quadrado do icone a esquerda. Ela
+ * ocupa menos espaco, nao concorre com o numero, e - por ser a mesma cor do
+ * badge daquele estado na tabela - liga o total a linha correspondente. O icone
+ * continua presente ao lado do rotulo, porque cor sozinha nao e sinal
+ * acessivel.
  */
 export function SummaryCards({
   resumo,
@@ -38,7 +50,7 @@ export function SummaryCards({
       valor: resumo?.total ?? 0,
       icone: "bi-inbox-fill",
       cor: "text-state-neutral",
-      fundo: "bg-state-neutral-soft",
+      barra: "bg-state-neutral",
       descricao: "eventos no log bruto",
     },
     {
@@ -46,7 +58,7 @@ export function SummaryCards({
       valor: contagem.SUCESSO ?? 0,
       icone: "bi-check-circle-fill",
       cor: "text-state-success",
-      fundo: "bg-state-success-soft",
+      barra: "bg-state-success",
       descricao: "contrato atualizado",
     },
     {
@@ -54,7 +66,7 @@ export function SummaryCards({
       valor: naFila,
       icone: "bi-hourglass-split",
       cor: "text-state-info",
-      fundo: "bg-state-info-soft",
+      barra: "bg-state-info",
       descricao: "aguardando o worker",
     },
     {
@@ -62,49 +74,65 @@ export function SummaryCards({
       valor: contagem.ERRO ?? 0,
       icone: "bi-x-octagon-fill",
       cor: "text-state-error",
-      fundo: "bg-state-error-soft",
+      barra: "bg-state-error",
       descricao: "falhou após as tentativas",
     },
     {
       titulo: "Inválidos",
       valor: contagem.INVALIDO ?? 0,
       icone: "bi-exclamation-triangle-fill",
-      cor: "text-state-warning",
-      fundo: "bg-state-warning-soft",
+      cor: "text-state-error",
+      barra: "bg-state-error",
       descricao: "reprovados na validação",
     },
   ];
 
   return (
-    <div className="row gy-3 gx-3 mb-4">
-      {cartoes.map((cartao) => (
-        <div key={cartao.titulo} className="col-6 col-lg-4 col-xl">
-          <Card className="h-full">
-            <CardContent className="flex items-center gap-3 p-4">
-              <div
+    <Card className="mb-5 overflow-hidden">
+      {/* O grid do Bootstrap divide a faixa; as divisorias sao Tailwind. */}
+      <div className="row g-0">
+        {cartoes.map((cartao, indice) => (
+          <div
+            key={cartao.titulo}
+            className={cn(
+              "col-6 col-lg-4 col-xl border-border-subtle",
+              // A divisoria acompanha quantos segmentos cabem por linha em cada
+              // breakpoint (2, depois 3, depois 5). Sem isso sobraria um traco
+              // solto encostado na borda do cartao toda vez que a faixa quebra.
+              indice % 2 !== 0 ? "border-l" : "border-l-0",
+              indice % 3 !== 0 ? "lg:border-l" : "lg:border-l-0",
+              indice !== 0 ? "xl:border-l" : "xl:border-l-0",
+              indice >= 2 ? "border-t" : "border-t-0",
+              indice >= 3 ? "lg:border-t" : "lg:border-t-0",
+              "xl:border-t-0",
+            )}
+          >
+            <div className="relative h-full p-4 pt-5">
+              <span
+                aria-hidden="true"
                 className={cn(
-                  "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
-                  cartao.fundo,
+                  "absolute left-4 top-0 h-1 w-8 rounded-b-full",
+                  cartao.barra,
                 )}
-              >
-                <i className={cn("bi", cartao.icone, cartao.cor)} aria-hidden="true" />
-              </div>
+              />
 
-              <div className="min-w-0">
-                {carregando ? (
-                  <Skeleton className="h-7 w-12" />
-                ) : (
-                  <p className="tabular text-2xl font-semibold leading-none">{cartao.valor}</p>
-                )}
-                <p className="mt-1 truncate text-xs font-medium">{cartao.titulo}</p>
-                <p className="truncate text-[0.7rem] text-[color:var(--muted-foreground)]">
-                  {cartao.descricao}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      ))}
-    </div>
+              {carregando ? (
+                <Skeleton className="h-9 w-16" />
+              ) : (
+                <p className="metric text-[2.15rem] font-semibold">{cartao.valor}</p>
+              )}
+
+              <p className="mt-2 flex items-center gap-1.5 truncate text-[0.8rem] font-semibold">
+                <i className={cn("bi", cartao.icone, cartao.cor)} aria-hidden="true" />
+                {cartao.titulo}
+              </p>
+              <p className="truncate text-[0.7rem] leading-snug text-fg-muted">
+                {cartao.descricao}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }

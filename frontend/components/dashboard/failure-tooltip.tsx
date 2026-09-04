@@ -75,8 +75,8 @@ export function FailureTooltip({
           // `cursor-help` sinaliza que ha algo a ler; sem `onClick`, porque a
           // acao do botao E abrir o tooltip (o Radix cuida disso).
           className={cn(
-            "inline-flex items-center gap-1 rounded cursor-help",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
+            "inline-flex cursor-help items-center gap-1.5 rounded-full px-2 py-1 transition-colors",
+            "hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
             aparencia.classe,
             className,
           )}
@@ -102,7 +102,7 @@ export function FailureTooltip({
         {/* O codigo aparece porque e o que a pessoa cola ao pedir ajuda, e o que
             aparece na metrica. A mensagem tecnica vem por ultimo e truncada: ela
             e contexto, nao o assunto principal do tooltip. */}
-        <p className="mt-2 font-mono text-[10px] text-[color:var(--muted-foreground)]">
+        <p className="mt-2 font-mono text-[10px] text-fg-muted">
           {diagnostico.codigo}
           {mensagemTecnica ? ` · ${mensagemTecnica.slice(0, 120)}` : null}
         </p>

@@ -17,18 +17,30 @@ import { cn } from "@/lib/utils";
  * `asChild` delega a renderizacao ao filho (via Radix Slot). E o que permite um
  * link com aparencia de botao sem aninhar `<a>` dentro de `<button>`, que e HTML
  * invalido e quebra a navegacao por teclado.
+ *
+ * <b>O recuo ao clicar</b> (`active:translate-y-px`) existe porque o painel tem
+ * acoes que nao mudam a tela na hora - "Atualizar" com os mesmos dados, por
+ * exemplo. Sem retorno tatil o operador clica de novo achando que nao pegou.
  */
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-colors focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50",
+  [
+    "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[var(--radius-control)]",
+    "text-sm font-medium",
+    "transition-[background-color,border-color,color,box-shadow,transform] duration-150",
+    "active:translate-y-px",
+    "focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand/20",
+    "disabled:pointer-events-none disabled:opacity-45",
+  ],
   {
     variants: {
       variant: {
-        default: "bg-brand text-white hover:bg-brand-strong shadow-sm",
+        default:
+          "bg-brand text-brand-contrast shadow-card hover:bg-brand-strong hover:shadow-lift",
         outline:
-          "border border-border-subtle bg-surface hover:bg-surface-muted text-[color:var(--foreground)]",
-        ghost: "hover:bg-surface-muted text-[color:var(--muted-foreground)] hover:text-[color:var(--foreground)]",
-        danger: "bg-state-error text-white hover:opacity-90 shadow-sm",
-        subtle: "bg-surface-muted text-[color:var(--foreground)] hover:bg-border-subtle",
+          "border border-border-subtle bg-surface text-fg hover:border-border-strong hover:bg-surface-muted",
+        ghost: "text-fg-muted hover:bg-surface-muted hover:text-fg",
+        danger: "bg-state-error text-white shadow-card hover:opacity-90",
+        subtle: "bg-surface-muted text-fg hover:bg-border-subtle",
       },
       size: {
         sm: "h-8 px-3 text-xs",

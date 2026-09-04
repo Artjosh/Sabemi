@@ -37,7 +37,6 @@ Os quatro primeiros formam uma trilha, na ordem, com navegação no topo de cada
 | [`TESTES.md`](docs/TESTES.md) | As suítes, como rodá-las e o que cobrem |
 | [`DEPLOY.md`](docs/DEPLOY.md) | Produção, secrets e escala |
 | [`APRESENTACAO.md`](docs/APRESENTACAO.md) | Arquitetura e as decisões técnicas, com o porquê de cada uma |
-| [`HANDOFF.md`](docs/HANDOFF.md) | Contexto para continuar o trabalho, incluindo as armadilhas já pisadas |
 
 ---
 
@@ -76,5 +75,4 @@ scripts/verificar-email.mjs   Diagnóstico do envio de e-mail, sob demanda
 scripts/smoke-test.sh         Verificação da stack em execução
 tests/e2e/                    Ponta a ponta contra a stack em containers
 docs/APRESENTACAO.md          Arquitetura e decisões técnicas
-docs/HANDOFF.md               Estado atual, o que falta e como continuar
 ```

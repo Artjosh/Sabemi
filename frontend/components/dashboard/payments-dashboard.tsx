@@ -35,6 +35,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   ApiError,
@@ -189,76 +190,85 @@ export function PaymentsDashboard() {
     // temporizador de atraso.
     <TooltipProvider>
       <div className="min-h-screen">
-        {/* O grid do Bootstrap organiza o esqueleto responsivo; o estilo e todo
-          Tailwind. Ver a divisao de responsabilidades em app/globals.css. */}
-        <header className="border-b border-border-subtle bg-surface">
+        {/*
+          CABECALHO
+          ---------
+          Uma faixa so, fixa no topo, com tres zonas: identidade a esquerda,
+          origem dos dados no centro, acoes a direita. A versao anterior
+          espalhava seis controles soltos na mesma linha, nenhum parecendo mais
+          importante que o outro. Agora as acoes que so mexem NESTA tela
+          (pausar, atualizar, tema) moram num unico grupo segmentado, e "Sair"
+          fica de fora dele - e a unica que tira o operador de onde ele esta.
+
+          O grid do Bootstrap organiza o esqueleto responsivo; o estilo e todo
+          Tailwind. Ver a divisao de responsabilidades em app/globals.css.
+        */}
+        <header className="sticky top-0 z-30 border-b border-border-subtle bg-surface/80 backdrop-blur-xl">
           <div className="container-fluid px-3 px-lg-4">
-            <div className="row align-items-center gy-2 py-3">
+            <div className="row align-items-center gy-3 py-3">
               <div className="col-12 col-lg-4">
-                <div className="flex items-center gap-2.5">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand text-white">
-                    <i className="bi bi-receipt-cutoff" aria-hidden="true" />
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand text-brand-contrast shadow-card">
+                    <i className="bi bi-receipt-cutoff text-lg" aria-hidden="true" />
                   </div>
                   <div className="min-w-0">
-                    <h1 className="truncate text-sm font-semibold leading-tight">
+                    <h1 className="truncate text-[0.95rem] font-semibold leading-tight tracking-[-0.01em]">
                       Painel de Pagamentos
                     </h1>
-                    <p className="truncate text-xs text-[color:var(--muted-foreground)]">
-                      {user?.email ?? "—"}
-                    </p>
+                    <p className="truncate text-xs text-fg-muted">{user?.email ?? "—"}</p>
                   </div>
                 </div>
               </div>
 
-              <div className="col-12 col-lg-5">
+              <div className="col-12 col-lg-4">
                 <div className="flex flex-wrap items-center gap-2 lg:justify-center">
                   <BackendSwitcher />
                   <ActiveBackendBadge backend={backendReal} />
                 </div>
               </div>
 
-              <div className="col-12 col-lg-3">
+              <div className="col-12 col-lg-4">
                 <div className="flex items-center justify-start gap-2 lg:justify-end">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setAutoRefresh((v) => !v)}
-                    title={
-                      autoRefresh
-                        ? "Pausar atualização automática"
-                        : "Retomar atualização automática"
-                    }
-                  >
-                    <i
-                      className={cn(
-                        "bi",
-                        autoRefresh ? "bi-pause-fill" : "bi-play-fill",
-                      )}
-                      aria-hidden="true"
-                    />
-                    {autoRefresh ? "Pausar" : "Retomar"}
-                  </Button>
+                  <div className="flex items-center gap-0.5 rounded-full border border-border-subtle bg-surface p-1 shadow-card">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="rounded-full"
+                      onClick={() => setAutoRefresh((v) => !v)}
+                      aria-label={autoRefresh ? "Pausar" : "Retomar"}
+                      title={
+                        autoRefresh
+                          ? "Pausar atualização automática"
+                          : "Retomar atualização automática"
+                      }
+                    >
+                      <i
+                        className={cn("bi", autoRefresh ? "bi-pause-fill" : "bi-play-fill")}
+                        aria-hidden="true"
+                      />
+                    </Button>
 
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void buscar(false)}
-                  >
-                    <i
-                      className={cn(
-                        "bi bi-arrow-clockwise",
-                        atualizandoAgora && "animate-spin",
-                      )}
-                      aria-hidden="true"
-                    />
-                    Atualizar
-                  </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="rounded-full"
+                      onClick={() => void buscar(false)}
+                      aria-label="Atualizar"
+                      title="Atualizar agora"
+                    >
+                      <i
+                        className={cn(
+                          "bi bi-arrow-clockwise",
+                          atualizandoAgora && "animate-spin",
+                        )}
+                        aria-hidden="true"
+                      />
+                    </Button>
 
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => void logout()}
-                  >
+                    <ThemeToggle />
+                  </div>
+
+                  <Button variant="ghost" size="sm" onClick={() => void logout()}>
                     <i className="bi bi-box-arrow-right" aria-hidden="true" />
                     Sair
                   </Button>
@@ -268,68 +278,95 @@ export function PaymentsDashboard() {
           </div>
         </header>
 
-        <main className="container-fluid px-3 px-lg-4 py-4">
+        {/* A largura maxima existe porque a tabela tem oito colunas: sem ela,
+            num monitor ultrawide, o olho percorre a tela inteira entre o status
+            e o botao de detalhe da MESMA linha. */}
+        <main className="container-fluid mx-auto max-w-[1600px] px-3 px-lg-4 py-6">
           <SummaryCards resumo={resumo} carregando={carregandoInicial} />
 
           {erro ? (
-            <Alert tone="error" icon="bi-wifi-off" className="mb-4">
+            <Alert tone="error" icon="bi-wifi-off" className="mb-5">
               <p className="font-semibold">Não foi possível atualizar</p>
-              <p className="text-xs">{erro}</p>
+              <p className="mt-0.5 text-xs opacity-90">{erro}</p>
             </Alert>
           ) : null}
 
-          <Card>
-            <CardHeader className="gap-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <CardTitle>Eventos recebidos</CardTitle>
+          <Card className="overflow-hidden">
+            {/*
+              BARRA DE FILTROS
+              ----------------
+              Os controles ficam numa linha so, alinhados pela base, em vez de
+              tres colunas do grid com um rotulo em cima de cada uma - que
+              empurrava a tabela para baixo e fazia o cartao comecar com um
+              bloco de formulario. A faixa tem fundo proprio para se ler como
+              barra de ferramentas da tabela, e nao como conteudo dela.
+            */}
+            <CardHeader className="gap-4 border-b border-border-subtle bg-surface-muted/40">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-baseline gap-2.5">
+                  <CardTitle>Eventos recebidos</CardTitle>
+                  {pagina ? (
+                    <span className="tabular text-xs text-fg-muted">
+                      {pagina.total} no total
+                    </span>
+                  ) : null}
+                </div>
+
+                {/* O ponto verde pulsando e o unico sinal de que a tela esta
+                    viva entre dois ciclos de polling. */}
                 <span
-                  className="text-xs text-[color:var(--muted-foreground)]"
+                  className="inline-flex items-center gap-2 rounded-full border border-border-subtle bg-surface px-2.5 py-1 text-xs text-fg-muted"
                   aria-live="polite"
                 >
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      "h-1.5 w-1.5 shrink-0 rounded-full",
+                      autoRefresh ? "animate-pulse bg-state-success" : "bg-state-neutral",
+                    )}
+                  />
                   {ultimaAtualizacao
                     ? `Atualizado ${formatRelative(ultimaAtualizacao.toISOString())}`
                     : "—"}
-                  {autoRefresh
-                    ? " · atualização automática ativa"
-                    : " · pausado"}
+                  {autoRefresh ? " · atualização automática ativa" : " · pausado"}
                 </span>
               </div>
 
               {/* Os dois filtros exigidos pela task: situacao e contrato. */}
-              <div className="row gy-2 gx-2">
-                <div className="col-12 col-md-4 col-xl-3">
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="filtro-status">Status</Label>
-                    <Select
-                      value={statusFiltro}
-                      onValueChange={(v) => {
-                        setStatusFiltro(v);
-                        setPage(1);
-                      }}
-                    >
-                      <SelectTrigger
-                        id="filtro-status"
-                        aria-label="Filtrar por status"
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={TODOS}>Todos os status</SelectItem>
-                        {PROCESSING_STATUSES.map((status) => (
-                          <SelectItem key={status} value={status}>
-                            {STATUS_LABELS[status]}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="flex min-w-[11rem] flex-col gap-1.5">
+                  <Label htmlFor="filtro-status">Status</Label>
+                  <Select
+                    value={statusFiltro}
+                    onValueChange={(v) => {
+                      setStatusFiltro(v);
+                      setPage(1);
+                    }}
+                  >
+                    <SelectTrigger id="filtro-status" aria-label="Filtrar por status">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={TODOS}>Todos os status</SelectItem>
+                      {PROCESSING_STATUSES.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {STATUS_LABELS[status]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
-                <div className="col-12 col-md-5 col-xl-4">
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="filtro-contrato">ID do contrato</Label>
+                <div className="flex min-w-[13rem] flex-1 flex-col gap-1.5">
+                  <Label htmlFor="filtro-contrato">ID do contrato</Label>
+                  <div className="relative">
+                    <i
+                      className="bi bi-search pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-fg-muted"
+                      aria-hidden="true"
+                    />
                     <Input
                       id="filtro-contrato"
+                      className="pl-8"
                       placeholder="CTR-00000"
                       value={contratoInput}
                       onChange={(e) => setContratoInput(e.target.value)}
@@ -337,27 +374,18 @@ export function PaymentsDashboard() {
                   </div>
                 </div>
 
-                <div className="col-12 col-md-3 col-xl-2">
-                  <div className="flex h-full flex-col justify-end">
-                    <Button
-                      variant="subtle"
-                      onClick={limparFiltros}
-                      disabled={!temFiltro}
-                      className="w-full"
-                    >
-                      <i className="bi bi-x-circle" aria-hidden="true" />
-                      Limpar filtros
-                    </Button>
-                  </div>
-                </div>
+                <Button variant="subtle" onClick={limparFiltros} disabled={!temFiltro}>
+                  <i className="bi bi-x-circle" aria-hidden="true" />
+                  Limpar filtros
+                </Button>
               </div>
             </CardHeader>
 
-            <CardContent className="px-0 pb-0">
+            <CardContent className="p-0">
               {carregandoInicial ? (
-                <div className="flex flex-col gap-2 px-5 pb-5">
-                  {Array.from({ length: 5 }).map((_, i) => (
-                    <Skeleton key={i} className="h-12 w-full" />
+                <div className="flex flex-col gap-px">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <Skeleton key={i} className="h-14 w-full rounded-none" />
                   ))}
                 </div>
               ) : pagina && pagina.items.length > 0 ? (
@@ -365,14 +393,14 @@ export function PaymentsDashboard() {
                   <Table>
                     <TableHeader>
                       <TableRow className="hover:bg-transparent">
-                        <TableHead>Status</TableHead>
+                        <TableHead className="pl-5">Status</TableHead>
                         <TableHead>ID transação</TableHead>
                         <TableHead>Contrato</TableHead>
                         <TableHead className="text-right">Valor</TableHead>
                         <TableHead>Pagamento</TableHead>
                         <TableHead>Recebido</TableHead>
                         <TableHead className="text-center">Tent.</TableHead>
-                        <TableHead className="text-right">Ações</TableHead>
+                        <TableHead className="pr-5 text-right">Ações</TableHead>
                       </TableRow>
                     </TableHeader>
 
@@ -387,10 +415,10 @@ export function PaymentsDashboard() {
                     </TableBody>
                   </Table>
 
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle px-5 py-3 text-sm">
-                    <span className="text-[color:var(--muted-foreground)]">
-                      {pagina.total} evento{pagina.total === 1 ? "" : "s"} ·
-                      página {pagina.page} de {totalPaginas}
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle bg-surface-muted/40 px-5 py-3 text-sm">
+                    <span className="text-fg-muted">
+                      {pagina.total} evento{pagina.total === 1 ? "" : "s"} · página{" "}
+                      {pagina.page} de {totalPaginas}
                     </span>
 
                     <div className="flex gap-2">
@@ -440,6 +468,12 @@ export function PaymentsDashboard() {
  * o requisito de "alerta visual claro". A distincao entre ERRO (falhou no
  * processamento) e INVALIDO (reprovado na validacao) e mantida: sao causas
  * diferentes e exigem acoes diferentes, embora as duas exijam atencao.
+ *
+ * <b>Hierarquia dentro da linha.</b> Oito colunas com o mesmo peso viram uma
+ * parede de texto. Aqui so tres coisas tem peso cheio - o status, o
+ * `id_transacao` e o valor -, que sao por onde o olho entra ao procurar um
+ * pagamento. Contrato, datas e tentativas ficam em tom secundario: servem para
+ * confirmar, nao para buscar.
  */
 function PaymentRow({
   evento,
@@ -453,46 +487,64 @@ function PaymentRow({
     evento.status_processamento === "INVALIDO";
 
   return (
-    <TableRow className={cn(comProblema && "bg-state-error-soft/40")}>
-      <TableCell>
-        <div className="flex items-center gap-2">
-          {comProblema ? (
-            <span
-              className="h-8 w-1 shrink-0 rounded-full bg-state-error"
-              aria-hidden="true"
-            />
-          ) : null}
-          <StatusBadge status={evento.status_processamento} />
-        </div>
+    <TableRow
+      className={cn(
+        "group",
+        // Fundo bem diluido: o realce marca a linha de relance sem competir em
+        // contraste com o texto que ela carrega.
+        comProblema && "bg-state-error-soft/35 hover:bg-state-error-soft/55",
+      )}
+    >
+      <TableCell className="relative pl-5">
+        {comProblema ? (
+          <span
+            className="absolute inset-y-2 left-0 w-[3px] rounded-r-full bg-state-error"
+            aria-hidden="true"
+          />
+        ) : null}
+        <StatusBadge status={evento.status_processamento} />
       </TableCell>
 
-      <TableCell className="font-mono text-xs">{evento.id_transacao}</TableCell>
+      <TableCell className="font-mono text-xs font-semibold">
+        {evento.id_transacao}
+      </TableCell>
 
-      <TableCell className="font-mono text-xs">
+      <TableCell className="font-mono text-xs text-fg-muted">
         {evento.id_contrato ?? "—"}
       </TableCell>
 
-      <TableCell className="tabular text-right font-medium">
+      <TableCell className="tabular whitespace-nowrap text-right text-[0.9rem] font-semibold">
         {formatCurrency(evento.valor)}
       </TableCell>
 
-      <TableCell className="tabular whitespace-nowrap text-xs">
+      <TableCell className="tabular whitespace-nowrap text-xs text-fg-muted">
         {formatDateTime(evento.data_pagamento)}
       </TableCell>
 
       <TableCell
-        className="whitespace-nowrap text-xs"
+        className="whitespace-nowrap text-xs text-fg-muted"
         title={formatDateTime(evento.recebido_em)}
       >
         {formatRelative(evento.recebido_em)}
       </TableCell>
 
-      <TableCell className="tabular text-center text-xs">
-        {evento.tentativas}
+      <TableCell className="text-center">
+        <span
+          className={cn(
+            "tabular inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-xs",
+            // Mais de uma tentativa e informacao: alguem ja teve trabalho com
+            // este evento. Uma so e o caso normal e nao merece destaque.
+            evento.tentativas > 1
+              ? "bg-state-warning-soft font-semibold text-state-warning"
+              : "text-fg-muted",
+          )}
+        >
+          {evento.tentativas}
+        </span>
       </TableCell>
 
-      <TableCell className="text-right">
-        <div className="flex items-center justify-end gap-1">
+      <TableCell className="pr-5 text-right">
+        <div className="flex items-center justify-end gap-1.5">
           {/* A CAUSA fica visivel sem precisar abrir o detalhe: e a informacao
               que o operador procura ao ver uma linha vermelha.
 
@@ -508,11 +560,16 @@ function PaymentRow({
             />
           ) : null}
 
+          {/* O botao so fica opaco quando o ponteiro esta na linha: com vinte
+              linhas na tela, vinte icones em contraste cheio competem entre si
+              e com o dado. Ele continua sempre focavel pelo teclado - e a
+              opacidade que muda, nao a existencia do alvo. */}
           <Button
             variant="ghost"
             size="icon"
             onClick={onDetalhe}
             aria-label="Ver detalhes"
+            className="opacity-55 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
           >
             <i className="bi bi-eye" aria-hidden="true" />
           </Button>
@@ -530,21 +587,18 @@ function EmptyState({
   onLimpar: () => void;
 }) {
   return (
-    <div className="flex flex-col items-center gap-3 px-5 py-16 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-muted">
-        <i
-          className="bi bi-inbox text-xl text-[color:var(--muted-foreground)]"
-          aria-hidden="true"
-        />
+    <div className="flex flex-col items-center gap-4 px-5 py-20 text-center">
+      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-surface-muted ring-1 ring-inset ring-border-subtle">
+        <i className="bi bi-inbox text-2xl text-fg-muted" aria-hidden="true" />
       </div>
 
       <div>
-        <p className="font-medium">
+        <p className="text-base font-semibold">
           {temFiltro
             ? "Nenhum evento com esses filtros"
             : "Nenhum evento recebido ainda"}
         </p>
-        <p className="mt-1 text-sm text-[color:var(--muted-foreground)]">
+        <p className="mx-auto mt-1.5 max-w-sm text-sm leading-relaxed text-fg-muted">
           {temFiltro
             ? "Ajuste os filtros para ver outros resultados."
             : "Assim que o banco parceiro enviar uma notificação, ela aparece aqui."}

@@ -45,4 +45,4 @@ As réplicas consomem a mesma fila sem conflito — a reivindicação usa
 
 ---
 
-Fim da trilha. Para entender **por que** o sistema é assim, [`APRESENTACAO.md`](APRESENTACAO.md); para continuar o trabalho, [`HANDOFF.md`](HANDOFF.md).
+Fim da trilha. Para entender **por que** o sistema é assim, [`APRESENTACAO.md`](APRESENTACAO.md).

@@ -49,8 +49,8 @@ export function TooltipContent({
         // tela larga fica ilegivel. `z-50` para ficar acima do Dialog, que e de
         // onde este tooltip costuma ser aberto.
         className={cn(
-          "z-50 max-w-xs rounded-lg border border-border-subtle bg-surface shadow-xl",
-          "px-3 py-2 text-xs leading-relaxed text-[color:var(--foreground)]",
+          "z-50 max-w-xs animate-pop-in rounded-[var(--radius-control)] border border-border-subtle bg-surface shadow-pop",
+          "px-3.5 py-2.5 text-xs leading-relaxed text-fg",
           className,
         )}
         {...props}

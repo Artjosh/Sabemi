@@ -17,6 +17,21 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * Chave do tema no localStorage.
+ *
+ * Mora aqui, e nao no componente do alternador, por uma razao de RSC: o
+ * `app/layout.tsx` e um componente de SERVIDOR e precisa da chave para montar o
+ * script que aplica o tema antes da primeira pintura. Importar um valor de um
+ * modulo `"use client"` a partir do servidor nao entrega o valor - entrega uma
+ * referencia de cliente, e a constante chega como `undefined`.
+ *
+ * Aconteceu exatamente isso: o script inline saiu com
+ * `localStorage.getItem(undefined)`, sempre nulo, e o tema escolhido era
+ * reaplicado so depois da hidratacao - o piscar que ele existia para evitar.
+ */
+export const THEME_STORAGE_KEY = "sabemi-tema";
+
 /** Formata um valor em reais. `null` vira travessao, nao "R$ 0,00". */
 export function formatCurrency(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";

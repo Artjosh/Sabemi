@@ -486,12 +486,47 @@ cada um um território próprio:
 | ---------------- | -------------------------------------------------------------- |
 | **Tailwind CSS** | O motor de estilo. Utilitários, tokens, modo escuro. Reset único |
 | **shadcn/ui**    | A camada de componentes, sobre Radix. Código do repositório      |
-| **Bootstrap**    | Apenas `bootstrap-grid.css` — só o grid, sem reboot — mais ícones |
+| **Bootstrap**    | `bootstrap-grid.css`, do qual usamos o grid — sem reboot — mais ícones |
 
-`bootstrap-grid.css` contém exclusivamente container/row/col e gutters: **zero
-conflito** com o preflight do Tailwind, verificável abrindo o arquivo. Usado no
-esqueleto responsivo do dashboard, onde o grid de 12 colunas expressa a intenção
-melhor do que uma pilha de utilitários.
+O grid é usado no esqueleto responsivo do dashboard, onde 12 colunas expressam a
+intenção melhor do que uma pilha de utilitários.
+
+### A colisão que este texto escondia
+
+Esta seção afirmava que `bootstrap-grid.css` contém *"exclusivamente
+container/row/col e gutters"* e, portanto, **zero conflito**. A primeira metade é
+falsa, e a consequência não era teórica.
+
+O arquivo embarca também a API de utilitários do Bootstrap — display, flex,
+`order`, `gap` e a escala inteira de `margin`/`padding` — com **`!important` em
+todas as 1.037 declarações**. Vários desses nomes existem no Tailwind com outro
+valor:
+
+| Classe | Bootstrap (venceu) | Tailwind (era o pedido) |
+| --- | --- | --- |
+| `.p-5`  | 3 rem   | 1,25 rem |
+| `.px-3` | 1 rem   | 0,75 rem |
+| `.mb-4` | 1,5 rem | 1 rem |
+
+Ou seja: **quase todo espaçamento do painel renderizava num número que ninguém
+escreveu** — a causa de a tela parecer frouxa nos cartões e apertada na tabela.
+
+O `layer(base)` do import, que era a defesa pensada para esse conflito, não tinha
+efeito: camadas ordenam declarações *normais*, e uma declaração `!important`
+vence qualquer normal em qualquer camada. O `twMerge` do `cn()` também não —
+ele resolve `p-4` contra `p-5` entre classes do Tailwind, não uma regra
+`!important` de mesmo nome vinda de outro framework.
+
+A correção está em `frontend/postcss.config.mjs`: um plugin de ~10 linhas remove
+do bundle toda regra do CSS importado cujas declarações sejam **todas**
+`!important`. Essa separação é do próprio Bootstrap — o grid (`.container*`,
+`.row`, `.col-*`, `.g*`, `.offset-*`) não usa `!important` em nenhuma regra, a API
+de utilitários usa em todas —, então ela distingue os dois sem manter uma lista
+de nomes que envelheceria a cada atualização.
+
+Sobra o grid, entram os ícones, e o Tailwind volta a ser o único dono do
+espaçamento — que é exatamente a divisão que o resto desta seção descreve.
+Verificável no bundle: `.row` e `.col-6` presentes, `.p-5{padding:3rem}` ausente.
 
 > Bootstrap cuida do **esqueleto** e dos **ícones**, Tailwind da **pele**,
 > shadcn/ui dos **órgãos**. Cada regra tem um dono único.
@@ -507,6 +542,19 @@ cada 5 s é inutilizável.
   consulta SQL.
 - **Alerta visual** para eventos com problema: barra vermelha, fundo próprio,
   ícone e o motivo do erro visível **sem precisar abrir o detalhe**.
+- **Tema claro/escuro** que começa seguindo o sistema e pode ser sobreposto pelo
+  operador — a máquina no escuro à noite e a sala clara de manhã são a mesma
+  pessoa. As cores são declaradas uma única vez com `light-dark()`, e a troca é um
+  atributo no `<html>`, sem uma classe `dark:` por utilitário.
+
+  O botão inverte o tema em **um** clique, e isso custou uma correção. A primeira
+  versão ciclava `sistema → claro → escuro → sistema` — parece completo e está
+  errado para o caso mais comum: com o sistema no escuro, o estado inicial é
+  “sistema”, então o primeiro clique levava a **claro**, clareando a tela que a
+  pessoa queria escurecer, e só o segundo chegava em escuro. Dois cliques, e o
+  primeiro para o lado oposto. A causa era tratar “sistema” como um passo do
+  ciclo; hoje ele é só o ponto de partida, e o clique lê o tema *efetivo* na tela
+  e grava o oposto.
 - **Cartões** que separam “na fila”, “com erro” e “inválidos”. Se “na fila” cresce
   sem parar, o worker parou — é o sinal mais útil do painel.
 - **Detalhe** com o payload bruto recebido e o estado consolidado do contrato.
@@ -515,6 +563,42 @@ cada 5 s é inutilizável.
 
 Cor nunca é o único sinal — todo estado tem ícone e rótulo, para quem não
 distingue verde de vermelho.
+
+### A fonte dos ícones dava 404 — e o sintoma apontava para o lugar errado
+
+Vale registrar, porque a lição não é sobre CSS.
+
+O `bootstrap-icons.css` traz o próprio `@font-face`, com
+`src: url(./fonts/bootstrap-icons.woff2)` — relativo **ao arquivo dele**, dentro
+de `node_modules`. Quem resolve o `@import` em `app/globals.css` é o PostCSS do
+Tailwind, que inlina o texto do CSS e perde a base do caminho. O `url()` sobrevive
+intacto e passa a ser relativo ao CSS final, apontando para
+`/_next/static/css/fonts/bootstrap-icons.woff2` — que não existe. O bundler não
+emite o arquivo, porque nunca soube que era um asset, e não avisa.
+
+O sintoma: a fonte dá 404, cada `.bi-*` cai no glifo de fallback, e **todos os
+ícones do painel aparecem idênticos**. Isso se lê como “escolheram o mesmo ícone
+para tudo” — um problema de *design* — e não como “a fonte não carregou”. Foi
+exatamente assim que o defeito foi relatado, e o tempo inicial foi gasto olhando
+a escolha de iconografia.
+
+A correção: `frontend/public/fonts/bootstrap-icons.woff2` (cópia que acompanha
+`bootstrap-icons` 1.13.1) e um `@font-face` declarado em `app/globals.css`
+**depois** do import, com caminho absoluto — duas declarações da mesma família, e
+a última vence. `public/` é o único lugar que funciona igual nos três caminhos de
+execução: `vinext dev`, `vinext build` e a imagem Docker (que copia `public/` no
+estágio final). Um script no `postinstall` não serviria — o `frontend/Dockerfile`
+instala com `--ignore-scripts` e chama `vinext build` direto.
+
+Se algum ícone parecer errado, a verificação leva dez segundos e não passa pelo
+CSS:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}
+" http://localhost:3000/fonts/bootstrap-icons.woff2
+```
+
+`200`, ~134 KB. Um `404` aqui explica qualquer reclamação sobre iconografia.
 
 ---
 
