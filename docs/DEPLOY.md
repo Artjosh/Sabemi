@@ -74,6 +74,15 @@ Actions):
 
 Sem eles o passo é ignorado em silêncio, e o restante do workflow segue igual.
 
+> **Uma armadilha do GitHub Actions, aprendida aqui.** Não dá para escrever
+> `if: ${{ secrets.X != '' }}` num step: o contexto `secrets` não existe em
+> condicional de step, e o GitHub **recusa o workflow inteiro na validação** —
+> sem rodar job nenhum e sem apontar a linha. O sintoma é obscuro: o run aparece
+> na lista com o **caminho do arquivo** (`.github/workflows/deploy.yml`) no lugar
+> do nome do workflow, porque ele nem chegou a ser lido. A saída é um passo
+> anterior que lê o segredo por `env` e publica um output — que é o que este
+> arquivo já fazia para o `DEPLOY_HOST`.
+
 > **Sobre o token:** um token de workspace não responde às consultas de conta
 > (`me`, `githubRepos`) — elas voltam `Not Authorized` mesmo com o token válido.
 > Isso confunde na hora de testar: o caminho para verificar que o token funciona

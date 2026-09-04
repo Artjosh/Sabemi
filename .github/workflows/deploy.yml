@@ -132,8 +132,29 @@ jobs:
       #
       # Este passo inverte a direcao e resolve com um segredo so. Roda apenas se
       # RAILWAY_TOKEN existir; sem ele, e ignorado em silencio.
+      #
+      # O `if` NAO pode consultar `secrets` direto: o contexto nao existe em
+      # condicional de step, e o GitHub recusa o workflow inteiro na validacao -
+      # sem rodar job nenhum e sem dizer qual linha. O sintoma e o run aparecer
+      # com o NOME DO ARQUIVO no lugar do nome do workflow, porque ele nem
+      # chegou a ser lido.
+      #
+      # A saida e a mesma que este arquivo ja usa para o DEPLOY_HOST: um passo
+      # anterior le o segredo por `env` e publica um output.
+      - name: Verifica se ha Railway configurado
+        id: railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          if [ -n "$RAILWAY_TOKEN" ]; then
+            echo "configurado=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configurado=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::RAILWAY_TOKEN nao configurado - o deploy no Railway foi ignorado."
+          fi
+
       - name: Deploy no Railway
-        if: ${{ secrets.RAILWAY_TOKEN != '' }}
+        if: steps.railway.outputs.configurado == 'true'
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
