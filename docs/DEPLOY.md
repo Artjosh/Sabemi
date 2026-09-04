@@ -56,6 +56,10 @@ A Vercel não executa .NET, e o laço de fila do VINEXT não sobrevive a serverl
 as duas coisas têm solução e estão descritas em
 [`DEPLOY-SERVERLESS.md`](DEPLOY-SERVERLESS.md).
 
+**Esse caminho está bloqueado hoje** por um defeito de bundling entre `vinext` e
+`nitro` (as duas em beta) — o pacote gerado não executa. O documento traz o erro
+exato e como reproduzi-lo em um comando. Use o caminho de containers acima.
+
 ---
 
 Fim da trilha. Para entender **por que** o sistema é assim, [`APRESENTACAO.md`](APRESENTACAO.md).

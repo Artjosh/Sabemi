@@ -42,6 +42,35 @@ interface ConexaoPostgres {
   host: string;
   port: number;
   database: string;
+  ssl: boolean;
+}
+
+/** Hosts que sao o Postgres desta stack, e nao um banco gerenciado. */
+const HOSTS_LOCAIS = new Set(["localhost", "127.0.0.1", "::1", "postgres", "db"]);
+
+/**
+ * Decide se a conexao usa TLS.
+ *
+ * <b>Por que nao basta descartar a query string.</b> O comentario do topo
+ * explica por que os campos de IDENTIDADE (usuario, senha, host, porta, banco)
+ * sao lidos um a um e o resto da URL e ignorado. Mas `sslmode` nao e um campo de
+ * identidade: e a unica parte da query string que muda se a conexao funciona ou
+ * nao. Ignorando-a, o adapter conecta em texto claro, e qualquer Postgres
+ * gerenciado (Supabase, RDS, Neon) recusa - com uma mensagem sobre a conexao ter
+ * sido encerrada, que nao menciona TLS.
+ *
+ * O padrao segue o host, e nao a ausencia do parametro: o Postgres desta stack
+ * roda em rede interna do Docker e nao tem certificado, enquanto um host remoto
+ * sempre precisa de TLS. Assim a mesma `DATABASE_URL` de sempre continua
+ * funcionando local, e uma URL do Supabase funciona sem configuracao extra.
+ */
+function lerSsl(url: URL): boolean {
+  const modo = url.searchParams.get("sslmode");
+
+  if (modo === "disable") return false;
+  if (modo) return true;
+
+  return !HOSTS_LOCAIS.has(url.hostname);
 }
 
 function lerConexao(): ConexaoPostgres {
@@ -71,13 +100,14 @@ function lerConexao(): ConexaoPostgres {
     );
   }
 
-  // A query string e deliberadamente ignorada - ver o comentario do topo.
+  // A query string e ignorada, com uma excecao: `sslmode`. Ver `lerSsl`.
   return {
     user,
     password,
     host: url.hostname,
     port: url.port ? Number(url.port) : 5432,
     database: url.pathname.replace(/^\//, "") || "postgres",
+    ssl: lerSsl(url),
   };
 }
 
@@ -90,6 +120,7 @@ function createClient(): PrismaClient {
     host: conexao.host,
     port: conexao.port,
     database: conexao.database,
+    ssl: conexao.ssl,
 
     // Identifica as conexoes deste backend em `pg_stat_activity`. Com dois
     // backends no mesmo banco, e o que permite saber de quem e cada conexao ao

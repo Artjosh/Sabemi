@@ -10,3 +10,4 @@ next-env.d.ts
 # Saidas do build para Vercel/Nitro (ver vite.config.vercel.ts)
 .output/
 .vercel/
+.vercel

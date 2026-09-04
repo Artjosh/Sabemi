@@ -31,6 +31,40 @@ dois provedores** — que é a topologia que o projeto realmente quer demonstrar
         └────────────────────────────────────────────┘
 ```
 
+> ## ⚠️ Estado: o caminho da Vercel está BLOQUEADO por um defeito upstream
+>
+> Tudo neste documento foi implementado e a metade do Supabase está **de pé e
+> migrada**. O que não funciona hoje é o último passo: o pacote que o Nitro gera
+> a partir do `vinext` **não executa**. A função sobe e toda rota devolve 500 com:
+>
+> ```
+> SyntaxError: Export 'ssr_exports' is not defined in module
+> ```
+>
+> **Não é configuração e não é da Vercel.** Reproduzido localmente com o preset
+> `node_server`, que nem toca na plataforma:
+>
+> ```bash
+> cd frontend
+> NITRO_PRESET=node_server npx vite build --config vite.config.vercel.ts
+> node .output/server/index.mjs        # 500 em toda rota, mesmo erro
+> ```
+>
+> A causa está na geração de chunks: o grafo de RSC/SSR do `vinext` não sobrevive
+> ao passo de bundling do Nitro — o build ainda avisa
+> `[INEFFECTIVE_DYNAMIC_IMPORT]` sobre os módulos envolvidos. É beta sobre beta:
+> `vinext@1.0.0-beta.8` e `nitro@3.0.260903-beta`.
+>
+> **O que fazer hoje:** subir as três imagens num host de containers, apontando
+> `DATABASE_URL` para o Supabase — ver [`DEPLOY.md`](DEPLOY.md). Funciona sem
+> nenhuma ressalva.
+>
+> **O que fica pronto para quando o bug cair:** `vite.config.vercel.ts`, o script
+> `build:vercel`, e o modo `sob-demanda` de processamento (com testes). Nada
+> disso depende do defeito — só o empacotamento final.
+>
+> Para re-testar depois de atualizar as duas dependências, use o comando acima.
+
 ## Por que esta divisão, e não tudo na Vercel
 
 **A Vercel não executa .NET.** Não há runtime; o `api` e o `worker` não têm como
