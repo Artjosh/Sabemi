@@ -41,6 +41,25 @@ Os quatro primeiros formam uma trilha, na ordem, com navegação no topo de cada
 
 ---
 
+## No ar
+
+| | |
+| --- | --- |
+| **Painel** | https://frontend-production-5213.up.railway.app |
+| **API .NET** | https://api-production-8d41.up.railway.app |
+
+Três serviços no Railway (`api`, `worker`, `frontend`), construídos pelos
+Dockerfiles do próprio repositório, com um **Supabase** como banco compartilhado.
+O `worker` não tem domínio: ele não atende requisição, só consome a fila.
+
+Para entrar, peça o acesso com qualquer e-mail — o painel exibe o link e o código
+de 6 dígitos na própria tela. **Isso é deliberado nesta demonstração**
+(`AUTH_EXPOSE_LOGIN_CODES=true`), para dispensar infraestrutura de e-mail; em
+produção de verdade a variável fica `false` e o código só vai por e-mail.
+
+O deploy está descrito em [`docs/DEPLOY.md`](docs/DEPLOY.md), incluindo as
+armadilhas que ele revelou.
+
 ## O que o sistema faz
 
 **Recebe** `POST /webhooks/pagamento` autenticado por ApiKey e, opcionalmente,
