@@ -45,6 +45,46 @@ As réplicas consomem a mesma fila sem conflito — a reivindicação usa
 
 ---
 
+### Railway: as três imagens vindas do repositório
+
+O caminho usado no deploy real deste projeto. Três serviços, todos apontando
+para o **mesmo repositório** — o Railway constrói pelos Dockerfiles, sem passar
+por registry.
+
+| Serviço | Root directory | Como se diferencia |
+| --- | --- | --- |
+| `api` | `backend-dotnet` | `APP_PROJECT=Sabemi.Api` |
+| `worker` | `backend-dotnet` | `APP_PROJECT=Sabemi.Worker` |
+| `frontend` | `frontend` | Dockerfile próprio |
+
+`api` e `worker` saem do **mesmo Dockerfile**: ele recebe `APP_PROJECT` como
+`ARG` e publica o projeto correspondente. O Railway expõe as variáveis do
+serviço como *build args*, então basta declarar a variável — que é exatamente a
+intenção registrada no comentário do `backend-dotnet/Dockerfile`.
+
+Quatro coisas que precisam de atenção, e nenhuma delas dá erro claro se estiver
+errada:
+
+- **`DATABASE_URL` igual nos três.** Se um apontar para outro banco, cada metade
+  enxerga uma fila diferente e nada nunca se encontra — sem erro nenhum.
+- **`JWT_SECRET` igual nos três.** É o que faz a troca de backend em runtime não
+  deslogar ninguem: os dois assinam a sessão com o mesmo segredo. Diferentes, e
+  trocar de backend no painel derruba a sessão — um logout que parece aleatório.
+- **`ASPNETCORE_HTTP_PORTS=8080`** no `api`. O Dockerfile fixa
+  `ASPNETCORE_URLS=http://+:8080`, e o Railway injeta `PORT`; declarar a porta
+  evita o serviço subir escutando no lugar errado.
+- **`DOTNET_API_URL` é a URL PÚBLICA do `api`.** No compose é `http://api:8080`
+  pela rede interna; aqui o gateway do frontend precisa do domínio público.
+
+O `worker` **não recebe domínio** — não tem rota de negócio. E não pode dormir:
+num plano que suspende serviços ociosos ele para de varrer a fila e o painel
+mostra "Na fila" crescendo para sempre, com os dois backends aparentemente
+saudáveis.
+
+O banco é um **Supabase remoto**, migrado uma vez pela porta 5432 (direta) e
+consumido pela 6543 (pooler) — ver a seção 1 de
+[`DEPLOY-SERVERLESS.md`](DEPLOY-SERVERLESS.md), que vale igual aqui.
+
 ### Outra topologia: partido entre dois provedores
 
 O acima sobe os quatro containers num host só. Há um segundo caminho, em que o
