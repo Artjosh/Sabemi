@@ -162,6 +162,8 @@ jobs:
 
       - name: Configura o pnpm
         uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
 
       - name: Configura o Node
         uses: actions/setup-node@v4
@@ -307,6 +309,8 @@ jobs:
 
       - name: Configura o pnpm
         uses: pnpm/action-setup@v4
+        with:
+          package_json_file: tests/e2e/package.json
 
       - name: Configura o Node
         uses: actions/setup-node@v4
