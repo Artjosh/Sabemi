@@ -13,11 +13,19 @@ using Sabemi.Api.Middleware;
 using Sabemi.Application.Auth;
 using Sabemi.Application.Contracts;
 using Sabemi.Infrastructure;
+using Sabemi.Infrastructure.Configuration;
 using Sabemi.Infrastructure.Persistence;
 using Serilog;
 using Sabemi.Api.Observability;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Faz `JWT_SECRET`, `WEBHOOK_API_KEY` e companhia valerem tambem aqui - os nomes
+// que o backend VINEXT usa. Precisa vir ANTES de qualquer leitura de
+// configuracao. Ver VariaveisPlanas: sem isto, um host que nao use o
+// docker-compose configura so metade do sistema, em silencio.
+VariaveisPlanas.Aplicar(builder.Configuration);
+VariaveisPlanas.ExigirSegredoProprio(builder.Configuration, builder.Environment.IsProduction());
 
 // Log estruturado desde o inicio: em container, stdout e a unica janela para
 // dentro do processo.

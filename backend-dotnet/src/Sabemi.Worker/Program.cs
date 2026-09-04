@@ -5,8 +5,16 @@ using Sabemi.Infrastructure;
 using Sabemi.Infrastructure.Persistence;
 using Sabemi.Worker;
 using Serilog;
+using Sabemi.Infrastructure.Configuration;
 
 var builder = Host.CreateApplicationBuilder(args);
+
+// Mesmo mapeamento da API - ver VariaveisPlanas. O worker le `Jwt:Secret` e a
+// secao `Processing`, e fora do Compose eles chegam pelos nomes planos.
+VariaveisPlanas.Aplicar(builder.Configuration);
+VariaveisPlanas.ExigirSegredoProprio(
+    builder.Configuration,
+    builder.Environment.EnvironmentName == "Production");
 
 builder.Services.AddSerilog((services, cfg) => cfg
     .ReadFrom.Configuration(builder.Configuration)

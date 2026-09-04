@@ -564,6 +564,40 @@ cada 5 s é inutilizável.
 Cor nunca é o único sinal — todo estado tem ícone e rótulo, para quem não
 distingue verde de vermelho.
 
+### Uma variável valia em só metade do sistema — de novo, e fora do Compose
+
+Os dois backends leem a mesma configuração sob nomes diferentes: o VINEXT usa o
+nome da variável direto (`WEBHOOK_API_KEY`), o .NET usa a convenção do
+`IConfiguration` (`WebhookSecurity__ApiKey`). Quem sempre ligou um ao outro foi o
+`docker-compose.yml`.
+
+No primeiro deploy fora do Compose esse intermediário deixou de existir. Definir
+`JWT_SECRET` passou a configurar **metade** do sistema — e a metade não
+configurada não reclama: cai no padrão do `appsettings.json`. Os dois backends
+respondiam `200`, o painel abria, e o `api` estava assinando a sessão com o
+segredo **versionado no repositório**.
+
+O único sintoma visível foi o webhook do .NET recusando a chave com `401`, e só
+porque a chave também estava no par. Se apenas o JWT estivesse errado, nada
+apareceria até alguém trocar de backend no painel e ser deslogado sem motivo
+aparente.
+
+É a mesma armadilha da seção do `AUTH_EXPOSE_LOGIN_CODES`, reaparecendo onde o
+teste de paridade não alcança — porque ele lê o `docker-compose.yml`, e ali não
+havia Compose para ler.
+
+**A correção segue um precedente do próprio repositório.** `DATABASE_URL` já
+servia aos dois backends, traduzida por `PostgresConnectionString`.
+`VariaveisPlanas` estende a ideia ao resto: o nome plano passa a ser entendido
+pelo .NET, e um host sem Compose recebe **uma** lista de variáveis que os dois
+lados leem. O nome específico continua vencendo, então o comportamento sob
+Compose não muda.
+
+E o modo de falha silencioso virou barulhento: **em produção, o host recusa
+subir com o segredo de exemplo**. Sete testes cobrem o mapa, a precedência e essa
+recusa — incluindo um que falha se alguém acrescentar uma configuração
+compartilhada e esquecer de registrá-la.
+
 ### A fonte dos ícones dava 404 — e o sintoma apontava para o lugar errado
 
 Vale registrar, porque a lição não é sobre CSS.
