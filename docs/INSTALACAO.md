@@ -1,5 +1,9 @@
 # Instalação
 
+[← README](../README.md) · **1. Instalação** · [2. Configuração](CONFIGURACAO.md) · [3. Testes](TESTES.md) · [4. Deploy](DEPLOY.md)
+
+---
+
 Do clone até a stack no ar, acessível pelo celular.
 
 ## Requisito
@@ -155,3 +159,7 @@ pnpm dev
 
 > Não existe `prisma migrate` neste projeto. O EF Core é o dono do schema; o
 > Prisma apenas o descreve. O script do passo 2 cuida dos dois lados.
+
+---
+
+**Próximo:** [Configuração](CONFIGURACAO.md) — variáveis, e-mail, Supabase, observabilidade.

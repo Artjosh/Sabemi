@@ -122,6 +122,11 @@ services:
       # produz confianca sem produzir o efeito.
       Auth__ExposeLoginCodesInDevelopment: ${AUTH_EXPOSE_LOGIN_CODES:-true}
 
+      # Espera minima entre dois pedidos de acesso para o mesmo e-mail. Em
+      # SEGUNDOS, para caber na mesma variavel que o VINEXT le - o binding de
+      # TimeSpan exigiria `00:01:00`, que o Node nao entende.
+      Auth__ResendCooldownSeconds: ${AUTH_RESEND_COOLDOWN_SECONDS:-60}
+
       # E-mail de acesso pela Brevo. A MESMA conta que o backend VINEXT usa: o
       # e-mail e o mesmo produto, venha de qual backend vier, e duas contas
       # dariam duas reputacoes de envio a cuidar.
@@ -243,6 +248,11 @@ services:
       # a entrega do link/OTP na resposta e nao sobraria caminho algum para
       # entrar. `docker-compose.prod.yml` fixa "false" e exige e-mail de verdade.
       AUTH_EXPOSE_LOGIN_CODES: ${AUTH_EXPOSE_LOGIN_CODES:-true}
+      AUTH_RESEND_COOLDOWN_SECONDS: ${AUTH_RESEND_COOLDOWN_SECONDS:-60}
+
+      # O mesmo teto do `RateLimit__AuthPermitLimit` do servico `api`: o limite
+      # nao deveria depender de qual backend atendeu.
+      AUTH_RATE_LIMIT: ${AUTH_RATE_LIMIT:-500}
 
       # Os DOIS backends usam o mesmo banco e o mesmo schema `sabemi` - e o que
       # faz o dado aparecer nos dois sem novo login. As migrations sao da API

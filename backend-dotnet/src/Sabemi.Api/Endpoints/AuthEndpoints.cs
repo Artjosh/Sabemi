@@ -120,11 +120,16 @@ public static class AuthEndpoints
     {
         var resultado = await auth.StartAsync(request.Email, ct);
 
-        return resultado.Ok
-            ? Results.Ok(resultado.Value)
-            : Results.Json(
-                ProblemDetailsDto.Of(resultado.Message!, "invalid_email"),
-                statusCode: StatusCodes.Status400BadRequest);
+        if (resultado.Ok) return Results.Ok(resultado.Value);
+
+        // 429, e nao 400: o pedido esta correto, so chegou cedo demais. A UI
+        // usa a distincao para dizer "aguarde Ns" em vez de "e-mail invalido",
+        // e a mensagem ja traz os segundos que faltam.
+        var (status, code) = resultado.Failure == AuthFailure.ResendTooSoon
+            ? (StatusCodes.Status429TooManyRequests, "resend_too_soon")
+            : (StatusCodes.Status400BadRequest, "invalid_email");
+
+        return Results.Json(ProblemDetailsDto.Of(resultado.Message!, code), statusCode: status);
     }
 
     /// <summary>

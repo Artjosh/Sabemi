@@ -33,6 +33,37 @@ public sealed class AuthOptions
     /// </summary>
     public bool? ExposeLoginCodesInDevelopment { get; set; }
 
+    /// <summary>
+    /// Espera minima entre dois pedidos de acesso para o MESMO e-mail.
+    /// </summary>
+    /// <remarks>
+    /// Sem isto, quem nao recebe o e-mail clica "enviar" repetidamente e cada
+    /// clique vira uma mensagem de verdade - e um endereco inexistente vira uma
+    /// sequencia de hard bounces, que e o que corroi reputacao de envio.
+    /// <para>
+    /// Um minuto e o mesmo valor que o GoTrue usa por padrao
+    /// (<c>GOTRUE_SMTP_MAX_FREQUENCY</c>), entao os dois modos de autenticacao se
+    /// comportam igual. Zero desliga.
+    /// </para>
+    /// <para>
+    /// A conta e feita na tabela de pedidos, que os DOIS backends compartilham:
+    /// pedir pelo .NET e repetir pelo VINEXT esbarra no mesmo prazo, porque a
+    /// espera e do e-mail, nao do processo que atendeu.
+    /// </para>
+    /// </remarks>
+    /// <remarks>
+    /// Em SEGUNDOS, e nao <c>TimeSpan</c>, para caber em uma unica variavel de
+    /// ambiente compartilhada com o backend VINEXT
+    /// (<c>AUTH_RESEND_COOLDOWN_SECONDS</c>). O binding de <c>TimeSpan</c> exige
+    /// <c>00:01:00</c>, que o Node nao entende - e o projeto ja pagou por essa
+    /// divergencia uma vez, quando o mesmo numero vivia em duas variaveis com
+    /// formatos diferentes.
+    /// </remarks>
+    public int ResendCooldownSeconds { get; set; } = 60;
+
+    /// <summary>A espera de reenvio como intervalo.</summary>
+    public TimeSpan ResendCooldown => TimeSpan.FromSeconds(Math.Max(0, ResendCooldownSeconds));
+
     /// <summary>Preenchido pelo host a partir do ambiente.</summary>
     public bool IsProduction { get; set; }
 
@@ -73,6 +104,16 @@ public enum AuthFailure
 
     /// <summary>E-mail ausente ou malformado.</summary>
     InvalidEmail,
+
+    /// <summary>
+    /// Pedido repetido para o mesmo e-mail antes do prazo de reenvio.
+    /// </summary>
+    /// <remarks>
+    /// Distinto de <see cref="TooManyAttempts"/>, que fala de tentativas de OTP e
+    /// destroi o pedido. Aqui o pedido anterior continua VALIDO: o e-mail pode
+    /// chegar a qualquer momento, e o link dele ainda funciona.
+    /// </remarks>
+    ResendTooSoon,
 
     /// <summary>
     /// O provedor de identidade externo nao pode ser consultado.
@@ -141,6 +182,31 @@ public sealed class AuthService(
         }
 
         var agora = clock.UtcNow;
+
+        // Espera de reenvio. Vem ANTES de invalidar o anterior de proposito: quem
+        // pede de novo cedo demais fica com o pedido que ja tem, e o e-mail que
+        // talvez esteja a caminho continua servindo. Invalidar e depois recusar
+        // deixaria a pessoa sem nenhum caminho de entrada.
+        if (_options.ResendCooldown > TimeSpan.Zero)
+        {
+            var recente = await db.LoginRequests
+                .Where(p => p.Email == email && p.Status == LoginRequestStatus.Pendente)
+                .OrderByDescending(p => p.CriadoEm)
+                .FirstOrDefaultAsync(ct);
+
+            if (recente is not null)
+            {
+                var faltam = recente.CriadoEm + _options.ResendCooldown - agora;
+                if (faltam > TimeSpan.Zero)
+                {
+                    var segundos = (int)Math.Ceiling(faltam.TotalSeconds);
+
+                    return AuthResult<MagicLinkStartDto>.Fail(
+                        AuthFailure.ResendTooSoon,
+                        $"Um acesso ja foi enviado. Aguarde {segundos}s para pedir outro.");
+                }
+            }
+        }
 
         // Um novo pedido invalida os anteriores do mesmo e-mail: sem isso, links
         // antigos continuariam validos e o usuario que pediu duas vezes teria

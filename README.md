@@ -28,9 +28,11 @@ Passo a passo, firewall e instalação sem Docker: [`docs/INSTALACAO.md`](docs/I
 
 ## Documentação
 
+Os quatro primeiros formam uma trilha, na ordem, com navegação no topo de cada um.
+
 | Documento | Para quê |
 | --- | --- |
-| [`INSTALACAO.md`](docs/INSTALACAO.md) | Clonar, subir e acessar pela rede |
+| [`INSTALACAO.md`](docs/INSTALACAO.md) | Clonar, subir e acessar pela rede — **comece aqui** |
 | [`CONFIGURACAO.md`](docs/CONFIGURACAO.md) | Variáveis do `.env`, e-mail, Supabase, observabilidade |
 | [`TESTES.md`](docs/TESTES.md) | As suítes, como rodá-las e o que cobrem |
 | [`DEPLOY.md`](docs/DEPLOY.md) | Produção, secrets e escala |

@@ -273,6 +273,17 @@ public class AuthExpiryTests(PostgresFixture postgres) : IAsyncLifetime
         public (string Token, int ExpiresInSeconds) Issue(AppUser user) => ("token-de-teste", 3600);
     }
 
+    /// <summary>
+    /// Endereco unico por teste.
+    /// </summary>
+    /// <remarks>
+    /// A espera de reenvio e contada por e-mail, na tabela. Um endereco fixo
+    /// compartilhado com outra classe de teste faria um pedido de la valer como
+    /// "recente" aqui - uma falha que so aparece quando as duas rodam perto uma
+    /// da outra, que e a pior forma de falhar.
+    /// </remarks>
+    private static string EmailUnico() => $"acesso-{Guid.NewGuid():N}@sabemi.com.br";
+
     private (AuthService Auth, FakeClock Clock, SabemiDbContext Db) Montar()
     {
         var db = postgres.CreateDbContext();
@@ -292,6 +303,55 @@ public class AuthExpiryTests(PostgresFixture postgres) : IAsyncLifetime
             NullLogger<AuthService>.Instance);
 
         return (auth, clock, db);
+    }
+
+    [Fact]
+    public async Task Pedir_de_novo_antes_do_prazo_e_recusado_e_o_anterior_SOBREVIVE()
+    {
+        // A ordem importa e e deliberada: recusa-se ANTES de invalidar o
+        // anterior. Invalidar e depois recusar deixaria quem clicou duas vezes
+        // sem nenhum caminho de entrada - e o e-mail do primeiro pedido pode
+        // estar a caminho.
+        //
+        // Sem esta espera, quem nao recebe o e-mail clica "enviar" em serie e
+        // cada clique vira uma mensagem de verdade. Para um endereco que nao
+        // existe, e uma sequencia de hard bounces.
+        var (auth, _, _) = Montar();
+        var email = EmailUnico();
+
+        var primeiro = await auth.StartAsync(email);
+        primeiro.Ok.ShouldBeTrue();
+
+        var repetido = await auth.StartAsync(email);
+
+        repetido.Ok.ShouldBeFalse();
+        repetido.Failure.ShouldBe(AuthFailure.ResendTooSoon);
+
+        // A mensagem traz os segundos que faltam: a tela mostra isso ao usuario.
+        repetido.Message.ShouldMatch(@"Aguarde \d+s");
+
+        // O pedido original continua servindo.
+        var antigo = await auth.PollAsync(primeiro.Value!.Selector);
+        antigo.Ok.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Passado_o_prazo_o_novo_pedido_invalida_o_anterior()
+    {
+        // Sem isto, links antigos continuariam validos e quem pedisse duas vezes
+        // teria dois codigos funcionando ao mesmo tempo.
+        var (auth, clock, _) = Montar();
+        var email = EmailUnico();
+
+        var primeiro = await auth.StartAsync(email);
+
+        clock.Advance(TimeSpan.FromSeconds(61));
+
+        var segundo = await auth.StartAsync(email);
+        segundo.Ok.ShouldBeTrue();
+
+        (await auth.PollAsync(primeiro.Value!.Selector)).Ok.ShouldBeFalse();
+        (await auth.PollAsync(segundo.Value!.Selector)).Ok.ShouldBeTrue();
     }
 
     [Fact]

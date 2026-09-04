@@ -29,6 +29,27 @@ import { BACKEND_COOKIE, SESSION_COOKIE, resolveBackend, sessionCookieOptions } 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+/**
+ * O que do pedido do browser atravessa para o backend.
+ *
+ * Só o IP, e por um motivo: o limite por IP dos endpoints de autenticação vive
+ * dentro do backend, e o gateway o chama EM PROCESSO. Sem repassar isto, todo o
+ * tráfego vindo da própria interface chegaria sem origem e ficaria fora do
+ * limite - protegido estaria apenas quem batesse direto em `/api/bff`.
+ *
+ * O valor é reescrito aqui a partir do que ESTE servidor enxerga; o cabeçalho
+ * que o cliente mandou não é repassado. Ver `server/bff/rate-limit.ts` para o
+ * que esse limite alcança neste runtime.
+ */
+function cabecalhosDoCliente(request: NextRequest): Headers {
+  const headers = new Headers();
+  const ip = request.headers.get("x-real-ip")
+    ?? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+
+  if (ip) headers.set("x-real-ip", ip);
+  return headers;
+}
+
 export async function POST(request: NextRequest) {
   const step = request.nextUrl.searchParams.get("step") ?? "poll";
 
@@ -49,7 +70,7 @@ export async function POST(request: NextRequest) {
       path: "auth/magic-link",
       searchParams: new URLSearchParams(),
       rawBody: JSON.stringify({ email: body.email }),
-      headers: new Headers(),
+      headers: cabecalhosDoCliente(request),
       token: null,
     });
 
@@ -62,7 +83,7 @@ export async function POST(request: NextRequest) {
       path: "auth/verify-otp",
       searchParams: new URLSearchParams(),
       rawBody: JSON.stringify({ selector: body.selector, code: body.code }),
-      headers: new Headers(),
+      headers: cabecalhosDoCliente(request),
       token: null,
     });
 
@@ -76,7 +97,7 @@ export async function POST(request: NextRequest) {
       path: "auth/login-status",
       searchParams: new URLSearchParams({ selector }),
       rawBody: JSON.stringify({ selector }),
-      headers: new Headers(),
+      headers: cabecalhosDoCliente(request),
       token: null,
     });
 

@@ -1,5 +1,9 @@
 # Deploy
 
+[← README](../README.md) · [1. Instalação](INSTALACAO.md) · [2. Configuração](CONFIGURACAO.md) · [3. Testes](TESTES.md) · **4. Deploy**
+
+---
+
 O CI publica três imagens no GitHub Container Registry a cada push na `main`:
 `api`, `worker` e `frontend` (multi-arquitetura, com SBOM e proveniência).
 
@@ -38,3 +42,7 @@ As réplicas consomem a mesma fila sem conflito — a reivindicação usa
 
 > Ao escalar, remova o mapeamento fixo da porta de métricas do worker: várias
 > réplicas não podem disputar a mesma porta do host.
+
+---
+
+Fim da trilha. Para entender **por que** o sistema é assim, [`APRESENTACAO.md`](APRESENTACAO.md); para continuar o trabalho, [`HANDOFF.md`](HANDOFF.md).

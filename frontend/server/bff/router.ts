@@ -2,6 +2,7 @@ import type { ProblemDetails, ProcessingStatus } from "@/lib/contracts";
 import { PROCESSING_STATUSES } from "@/lib/contracts";
 
 import { bffConfig } from "./config";
+import { ipDoCliente, permitir } from "./rate-limit";
 import { verifySessionToken } from "./crypto";
 import type { AuthFailure } from "./auth-service";
 import {
@@ -44,6 +45,19 @@ import { iniciarTelemetria } from "./telemetry-setup";
  * assim o gateway a repassa sem serializar e desserializar de novo, e os testes
  * inspecionam o corpo sem precisar de um servidor no ar.
  */
+
+/**
+ * Rotas de autenticacao sob limite por IP.
+ *
+ * `auth/confirm` fica de fora de proposito: e o link do e-mail sendo aberto, e
+ * limitar por IP puniria varias pessoas atras do mesmo NAT corporativo por um
+ * clique legitimo. O que protege esse caminho e o token ser de uso unico.
+ */
+const ROTAS_LIMITADAS = new Set([
+  "auth/magic-link",
+  "auth/verify-otp",
+  "auth/supabase/aprovar",
+]);
 
 export interface BffRequest {
   method: string;
@@ -147,13 +161,33 @@ async function despachar(request: BffRequest): Promise<BffResponse> {
   }
 
   // ------------------------------------------------------------------ auth
+
+  // Mesmas tres rotas que o .NET marca com `RequireRateLimiting("auth")`. A
+  // guarda fica aqui, e nao no route handler, porque o gateway chama
+  // `handleBffRequest` EM PROCESSO: protegendo so a rota HTTP, todo o trafego da
+  // propria interface passaria por fora.
+  if (ROTAS_LIMITADAS.has(path) && method === "POST") {
+    const ip = ipDoCliente(request.headers);
+
+    if (ip && !permitir(`auth:${ip}`, bffConfig.auth.rateLimit)) {
+      return problem(429, "Muitas tentativas. Aguarde um minuto.", "rate_limited");
+    }
+  }
+
   if (path === "auth/magic-link" && method === "POST") {
     const body = safeJson(request.rawBody);
     const resultado = await startLogin((body as { email?: unknown })?.email);
 
+    // Status e codigo derivados da falha, e nao fixos: um pedido repetido cedo
+    // demais e 429 com `resend_too_soon`, nao 400 com `invalid_email`. A UI usa
+    // a distincao para dizer "aguarde Ns" em vez de "e-mail invalido".
     return resultado.ok
       ? { status: 200, body: resultado.value }
-      : problem(400, resultado.message, "invalid_email");
+      : problem(
+          statusAuth(resultado.failure),
+          resultado.message,
+          mapAuthCode(resultado.failure),
+        );
   }
 
   if (path === "auth/confirm" && method === "GET") {
@@ -354,6 +388,8 @@ function mapAuthCode(failure: AuthFailure): string {
       return "invalid_email";
     case "provider_unavailable":
       return "identity_provider_unavailable";
+    case "resend_too_soon":
+      return "resend_too_soon";
     default:
       return "invalid_code";
   }
@@ -372,6 +408,8 @@ function statusAuth(failure: AuthFailure): number {
     case "not_found":
       return 404;
     case "too_many_attempts":
+    // 429, e nao 400: o pedido esta correto, so chegou cedo demais.
+    case "resend_too_soon":
       return 429;
     case "provider_unavailable":
       return 503;

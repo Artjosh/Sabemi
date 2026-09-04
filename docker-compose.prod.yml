@@ -60,6 +60,7 @@ services:
       # seguiria valendo no servidor, e o teto de tentativas de login estaria
       # cinquenta vezes mais alto sem ninguem ter decidido isso.
       RateLimit__AuthPermitLimit: "10"
+      Auth__ResendCooldownSeconds: ${AUTH_RESEND_COOLDOWN_SECONDS:-60}
       Cors__AllowedOrigins__0: ${FRONTEND_PUBLIC_URL:?defina FRONTEND_PUBLIC_URL}
     deploy:
       resources:
@@ -103,6 +104,8 @@ services:
       # Falha fechada: em producao o servidor nunca devolve link nem codigo OTP
       # na resposta, qualquer que seja esta variavel. Explicito por clareza.
       AUTH_EXPOSE_LOGIN_CODES: "false"
+      AUTH_RESEND_COOLDOWN_SECONDS: ${AUTH_RESEND_COOLDOWN_SECONDS:-60}
+      AUTH_RATE_LIMIT: "10"
     deploy:
       resources:
         limits:

@@ -1,5 +1,9 @@
 # Configuração
 
+[← README](../README.md) · [1. Instalação](INSTALACAO.md) · **2. Configuração** · [3. Testes](TESTES.md) · [4. Deploy](DEPLOY.md)
+
+---
+
 Tudo o que o `.env` controla, e os modos que a stack aceita. Para apenas subir o
 projeto, [`INSTALACAO.md`](INSTALACAO.md) basta.
 
@@ -71,12 +75,42 @@ curl -s -X POST http://localhost:8080/auth/magic-link   -H "Content-Type: applic
 ```
 
 As URLs públicas precisam ser alcançáveis pelo **navegador**, possivelmente de
-outro aparelho: para testar o fluxo cross-device na sua rede, troque `localhost`
-pelo IP da máquina.
+outro aparelho — `node scripts/subir.mjs` cuida disso detectando o IP da rede,
+como descrito em [`INSTALACAO.md`](INSTALACAO.md#acesso-pela-rede).
 
-`AUTH_RATE_LIMIT=10` é o valor de produção. A suíte ponta a ponta sobe a stack
-com `500` porque faz dezenas de logins do mesmo IP em segundos — enfraquecer o
-limite para todo mundo seria pior.
+## Duas proteções distintas no login
+
+Elas resolvem problemas diferentes e valem nos **dois backends**.
+
+**`AUTH_RESEND_COOLDOWN_SECONDS` — espera entre pedidos do mesmo e-mail.** Padrão
+de 60 segundos, o mesmo do GoTrue (`GOTRUE_SMTP_MAX_FREQUENCY`), para que os dois
+modos de autenticação se comportem igual. Sem ela, quem não recebe o e-mail clica
+"enviar" repetidamente e cada clique vira uma mensagem de verdade — para um
+endereço inexistente, uma sequência de hard bounces.
+
+Pedir de novo cedo demais devolve `429` com o código `resend_too_soon` e a
+mensagem já traz os segundos que faltam. **O pedido anterior sobrevive**: o e-mail
+dele pode estar a caminho, e o link continua servindo. A recusa acontece *antes*
+de invalidar o pedido antigo — a ordem inversa deixaria a pessoa sem nenhum
+caminho de entrada.
+
+A conta é feita na tabela de pedidos, que os dois backends compartilham: pedir
+pelo .NET e repetir pelo VINEXT esbarra no mesmo prazo, porque a espera é do
+e-mail e não do processo que atendeu. Zero desliga.
+
+**`AUTH_RATE_LIMIT` — pedidos por minuto, por IP.** `500` em desenvolvimento e
+`10` em produção. O valor de produção numa stack de desenvolvimento não protege
+ninguém e atrapalha todo mundo: a suíte ponta a ponta faz dezenas de logins do
+mesmo IP em segundos, e quem demonstra o painel clicando também estoura.
+`docker-compose.prod.yml` fixa os `10` sem consultar o ambiente.
+
+> **O que esse limite alcança em cada backend não é igual.** O .NET particiona
+> pelo endereço do socket, que o cliente não escolhe. O VINEXT roda num runtime
+> sem acesso ao socket: o IP só chega por cabeçalho (`x-real-ip`,
+> `x-forwarded-for`), que existe atrás de um proxy e que um cliente direto pode
+> inventar. Sem IP, o VINEXT não limita — um balde único compartilhado trancaria
+> todo mundo por causa de uma pessoa. Quem cobre o caso que importa nos dois,
+> sem depender de IP, é a espera de reenvio acima.
 
 ## E-mail
 
@@ -175,8 +209,9 @@ Estas têm default no código e no compose. Só defina se precisar mudar:
 | `PROCESSING_SIMULATED_WORK_MS` | `2000` | A regra pesada simulada |
 | `PROCESSING_BATCH_SIZE` | `10` (.NET) / `5` (BFF) | Itens reivindicados por ciclo |
 | `PROCESSING_MAX_ATTEMPTS` | `3` | Tentativas antes da falha definitiva |
-| `AUTH_RATE_LIMIT` | `10` | Pedidos de login por minuto, por IP |
+| `AUTH_RATE_LIMIT` | `500` dev / `10` prod | Pedidos de login por minuto, por IP |
 | `AUTH_EXPOSE_LOGIN_CODES` | segue o ambiente | Entrega link e código na resposta, **nos dois backends** |
+| `AUTH_RESEND_COOLDOWN_SECONDS` | `60` | Espera entre dois pedidos para o mesmo e-mail |
 | `WEBHOOK_REQUIRE_SIGNATURE` | `false` | Exige `X-Signature` em toda chamada |
 | `API_PORT` / `FRONTEND_PORT` / `POSTGRES_PORT` | `8080` / `3000` / `5432` | Portas no host |
 | `SUPABASE_PORT` / `SUPABASE_STUDIO_PORT` | `54321` / `54323` | Portas da plataforma |
@@ -288,3 +323,7 @@ pooler em transaction mode não suporta DDL de migration).
 
 TLS é exigido automaticamente para qualquer host que não seja local, mesmo sem
 `sslmode` na URL.
+
+---
+
+**Próximo:** [Testes](TESTES.md) — as suítes e o que cada uma cobre.

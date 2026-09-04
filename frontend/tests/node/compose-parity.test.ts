@@ -53,6 +53,26 @@ describe("as variáveis que valem para os DOIS backends chegam aos dois", () => 
     );
   });
 
+  it("AUTH_RESEND_COOLDOWN_SECONDS e AUTH_RATE_LIMIT alimentam os dois", () => {
+    // A espera de reenvio é contada na tabela de pedidos, que os dois backends
+    // compartilham. Valendo em só um deles, bastaria trocar de backend no painel
+    // para pular a espera - e o `.env` diria uma coisa enquanto o sistema faria
+    // outra.
+    const compose = readFileSync(resolve(RAIZ, "docker-compose.yml"), "utf-8");
+
+    expect(ambienteDo(compose, "api")).toContain(
+      "Auth__ResendCooldownSeconds: ${AUTH_RESEND_COOLDOWN_SECONDS",
+    );
+    expect(ambienteDo(compose, "frontend")).toContain(
+      "AUTH_RESEND_COOLDOWN_SECONDS: ${AUTH_RESEND_COOLDOWN_SECONDS",
+    );
+
+    expect(ambienteDo(compose, "api")).toContain(
+      "RateLimit__AuthPermitLimit: ${AUTH_RATE_LIMIT",
+    );
+    expect(ambienteDo(compose, "frontend")).toContain("AUTH_RATE_LIMIT: ${AUTH_RATE_LIMIT");
+  });
+
   it("em produção os dois falham FECHADOS, sem depender do ambiente", () => {
     // Aqui o valor não vem de `.env`: não deve existir variável que ligue o
     // atalho num servidor de produção, nem por engano.
@@ -62,6 +82,12 @@ describe("as variáveis que valem para os DOIS backends chegam aos dois", () => 
       'Auth__ExposeLoginCodesInDevelopment: "false"',
     );
     expect(ambienteDo(prod, "frontend")).toContain('AUTH_EXPOSE_LOGIN_CODES: "false"');
+
+    // O teto de login também: antes de ser fixado aqui, produção herdava
+    // `${AUTH_RATE_LIMIT:-500}` da base, e um valor deixado no `.env` para rodar
+    // os testes seguiria valendo no servidor.
+    expect(ambienteDo(prod, "api")).toContain('RateLimit__AuthPermitLimit: "10"');
+    expect(ambienteDo(prod, "frontend")).toContain('AUTH_RATE_LIMIT: "10"');
   });
 
   it("a variável está no `.env.example`, com valor vazio", () => {

@@ -1,14 +1,18 @@
 # Testes
 
-**683 testes** no total.
+[← README](../README.md) · [1. Instalação](INSTALACAO.md) · [2. Configuração](CONFIGURACAO.md) · **3. Testes** · [4. Deploy](DEPLOY.md)
+
+---
+
+**618 testes** no total.
 
 ```bash
-# Backend .NET — 275 testes (unidade + integração com PostgreSQL real)
+# Backend .NET — 229 testes (unidade + integração com PostgreSQL real)
 cd backend-dotnet
 dotnet test Sabemi.slnx --settings coverlet.runsettings --results-directory TestResults
 python scripts/check-coverage.py TestResults --min 80
 
-# Frontend + BFF — 356 testes. Precisa do PostgreSQL no ar
+# Frontend + BFF — 337 testes. Precisa do PostgreSQL no ar
 cd frontend
 pnpm test              # sem cobertura
 pnpm test:coverage     # com o limiar aplicado
@@ -61,3 +65,7 @@ node scripts/verificar-email.mjs voce@exemplo.com
 Ele separa as quatro causas de falha que a Brevo não deixa óbvias — chave errada,
 IP não autorizado, remetente não verificado, destinatário na blocklist — e diz o
 que fazer em cada uma.
+
+---
+
+**Próximo:** [Deploy](DEPLOY.md) — produção, secrets e escala.

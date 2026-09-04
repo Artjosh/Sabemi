@@ -48,7 +48,11 @@ export type AuthFailure =
   | "invalid_code"
   | "too_many_attempts"
   | "invalid_email"
-  | "provider_unavailable";
+  | "provider_unavailable"
+  // Pedido repetido para o mesmo e-mail antes do prazo de reenvio. Distinto de
+  // `too_many_attempts`, que fala de tentativas de OTP e destrói o pedido: aqui
+  // o pedido anterior continua VÁLIDO, e o e-mail pode chegar a qualquer momento.
+  | "resend_too_soon";
 
 export type AuthResult<T> =
   | { ok: true; value: T }
@@ -84,6 +88,33 @@ export async function startLogin(rawEmail: unknown): Promise<AuthResult<MagicLin
   }
 
   const agora = new Date();
+
+  // Espera de reenvio. Vem ANTES de invalidar o anterior de propósito: quem pede
+  // de novo cedo demais fica com o pedido que já tem, e o e-mail que talvez
+  // esteja a caminho continua servindo. Invalidar e depois recusar deixaria a
+  // pessoa sem nenhum caminho de entrada.
+  //
+  // A conta é feita na tabela de pedidos, que os DOIS backends compartilham:
+  // pedir pelo VINEXT e repetir pelo .NET esbarra no mesmo prazo, porque a
+  // espera é do e-mail e não do processo que atendeu.
+  if (bffConfig.auth.resendCooldownMs > 0) {
+    const recente = await prisma.loginRequest.findFirst({
+      where: { email, status: "PENDENTE" },
+      orderBy: { criadoEm: "desc" },
+    });
+
+    if (recente) {
+      const faltamMs =
+        recente.criadoEm.getTime() + bffConfig.auth.resendCooldownMs - agora.getTime();
+
+      if (faltamMs > 0) {
+        return fail(
+          "resend_too_soon",
+          `Um acesso ja foi enviado. Aguarde ${Math.ceil(faltamMs / 1000)}s para pedir outro.`,
+        );
+      }
+    }
+  }
 
   // Um novo pedido invalida os anteriores do mesmo e-mail: sem isso, links
   // antigos continuariam validos e quem pediu duas vezes teria dois codigos

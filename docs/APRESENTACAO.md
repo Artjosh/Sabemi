@@ -851,14 +851,14 @@ publicados, e rodam com **usuário sem privilégios**.
 
 ## 16. Testes
 
-**683 testes.** Cobertura de **84,0 %** no backend .NET e **89,1 %** de linhas no
+**618 testes.** Cobertura de **84,0 %** no backend .NET e **89,1 %** de linhas no
 frontend — ambos acima do mínimo de 80 % exigido, verificado no pipeline.
 
 | Suíte                  | Testes  | Ambiente                                    |
 | ---------------------- | ------- | ------------------------------------------- |
-| .NET — unidade         | 189     | Sem I/O: domínio, validação, HMAC, clientes HTTP com handler falso |
-| .NET — integração      | 86      | PostgreSQL real (Testcontainers)            |
-| Frontend — node        | 302     | PostgreSQL real                             |
+| .NET — unidade         | 141     | Sem I/O: domínio, validação, HMAC, clientes HTTP com handler falso |
+| .NET — integração      | 88      | PostgreSQL real (Testcontainers)            |
+| Frontend — node        | 283     | PostgreSQL real                             |
 | Frontend — componentes | 54      | jsdom + Testing Library                     |
 | **Ponta a ponta**      | **52**  | **Stack em containers, pela rede**          |
 

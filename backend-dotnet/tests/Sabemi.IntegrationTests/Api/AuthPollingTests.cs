@@ -95,18 +95,22 @@ public class AuthPollingTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Novo_pedido_invalida_o_anterior_do_mesmo_email()
+    public async Task Pedir_de_novo_cedo_demais_devolve_429_pelo_HTTP()
     {
-        // Sem isto, quem pedisse duas vezes teria dois codigos validos ao mesmo
-        // tempo - e o link antigo continuaria funcionando.
+        // 429 e nao 400: o pedido esta correto, so chegou cedo demais. A UI usa
+        // a distincao para dizer "aguarde Ns" em vez de "e-mail invalido".
+        //
+        // A regra em si, incluindo a metade que depende do tempo passar, esta em
+        // AuthExpiryTests - la o relogio e controlado.
         var primeiro = await IniciarLogin();
-        var segundo = await IniciarLogin();
 
-        var respostaAntiga = await Poll(primeiro.Selector);
-        respostaAntiga.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        var repetida = await _client.PostAsJsonAsync(
+            "/auth/magic-link", new { email = "operador@sabemi.com.br" });
 
-        var respostaNova = await Poll(segundo.Selector);
-        respostaNova.StatusCode.ShouldBe(HttpStatusCode.OK);
+        repetida.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests);
+
+        // O pedido original sobrevive: o e-mail dele pode estar a caminho.
+        (await Poll(primeiro.Selector)).StatusCode.ShouldBe(HttpStatusCode.OK);
     }
 
     // ---------------------------------------------------------------- polling

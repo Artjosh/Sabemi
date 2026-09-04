@@ -64,6 +64,33 @@ export const bffConfig = {
      */
     exposeLoginCodes: env("AUTH_EXPOSE_LOGIN_CODES", isProduction ? "false" : "true") === "true",
 
+    /**
+     * Espera minima entre dois pedidos de acesso para o MESMO e-mail.
+     *
+     * Sem isto, quem nao recebe o e-mail clica "enviar" repetidamente e cada
+     * clique vira uma mensagem de verdade - e um endereco inexistente vira uma
+     * sequencia de hard bounces, que e o que corroi reputacao de envio.
+     *
+     * Um minuto e o mesmo valor que o GoTrue usa por padrao
+     * (`GOTRUE_SMTP_MAX_FREQUENCY`), entao os dois modos de autenticacao se
+     * comportam igual. Zero desliga.
+     */
+    resendCooldownMs:
+      Number(env("AUTH_RESEND_COOLDOWN_SECONDS", "60")) * 1000,
+
+    /**
+     * Pedidos de autenticacao por minuto, por IP.
+     *
+     * A MESMA variavel que alimenta o `RateLimit:AuthPermitLimit` do backend
+     * .NET - o limite nao deveria depender de qual implementacao atendeu. O
+     * padrao acompanha o do compose: folgado em desenvolvimento, apertado em
+     * producao.
+     *
+     * Zero desliga. Ver `rate-limit.ts` para o que este limite alcanca neste
+     * runtime, que nao e o mesmo que o .NET alcanca.
+     */
+    rateLimit: Number(env("AUTH_RATE_LIMIT", isProduction ? "10" : "500")),
+
     /** Base publica para montar o link de confirmacao. */
     publicBaseUrl: env("BFF_PUBLIC_BASE_URL", "http://localhost:3000"),
   },
