@@ -209,10 +209,29 @@ de transcrição aparecendo como falha de autenticação em apenas um dos backen
 | `JWT_SECRET` | Assina a sessão. Mín. 32 caracteres, **o mesmo nos dois backends** |
 | `API_PUBLIC_URL` / `FRONTEND_PUBLIC_URL` | Base do link de acesso |
 
-`AUTH_EXPOSE_LOGIN_CODES` vazio segue o ambiente: ligado fora de produção,
-desligado em produção. Um valor explícito vence nos dois sentidos — e ligá-lo em
-produção registra um aviso na inicialização, porque nesse modo **qualquer um que
-peça acesso com um e-mail entra como aquele e-mail**.
+### O atalho de desenvolvimento
+
+Fora de produção, a resposta do login traz `dev_magic_url` e `dev_otp_code`, e a
+tela os exibe. É o que permite demonstrar o fluxo cross-device sem provedor de
+e-mail configurado.
+
+**A decisão é do servidor, não da interface.** Com o atalho desligado, os dois
+campos vêm `null` no corpo da resposta — não há nada escondido no JSON para
+alguém revelar pelo DevTools. `AUTH_EXPOSE_LOGIN_CODES` controla os dois
+backends: o VINEXT lê a variável direto, e o compose a entrega ao .NET sob o nome
+que ele espera (`Auth__ExposeLoginCodesInDevelopment`).
+
+Vazio segue o ambiente: ligado fora de produção, desligado em produção. Um valor
+explícito vence nos dois sentidos — e ligá-lo em produção registra um aviso na
+inicialização, porque nesse modo **qualquer um que peça acesso com um e-mail
+entra como aquele e-mail**. Em `docker-compose.prod.yml` os dois serviços fixam
+`false` sem consultar o ambiente, para que nenhum `.env` consiga ligá-lo lá.
+
+Para conferir num ambiente qualquer, sem adivinhar:
+
+```bash
+curl -s -X POST http://localhost:8080/auth/magic-link   -H "Content-Type: application/json" -d '{"email":"x@e2e.invalid"}'
+```
 
 As URLs públicas precisam ser alcançáveis pelo **navegador**, possivelmente de
 outro aparelho: para testar o fluxo cross-device na sua rede, troque `localhost`
@@ -320,7 +339,7 @@ Estas têm default no código e no compose. Só defina se precisar mudar:
 | `PROCESSING_BATCH_SIZE` | `10` (.NET) / `5` (BFF) | Itens reivindicados por ciclo |
 | `PROCESSING_MAX_ATTEMPTS` | `3` | Tentativas antes da falha definitiva |
 | `AUTH_RATE_LIMIT` | `10` | Pedidos de login por minuto, por IP |
-| `AUTH_EXPOSE_LOGIN_CODES` | segue o ambiente | Entrega link e código na resposta |
+| `AUTH_EXPOSE_LOGIN_CODES` | segue o ambiente | Entrega link e código na resposta, **nos dois backends** |
 | `WEBHOOK_REQUIRE_SIGNATURE` | `false` | Exige `X-Signature` em toda chamada |
 | `API_PORT` / `FRONTEND_PORT` / `POSTGRES_PORT` | `8080` / `3000` / `5432` | Portas no host |
 | `SUPABASE_PORT` / `SUPABASE_STUDIO_PORT` | `54321` / `54323` | Portas da plataforma |

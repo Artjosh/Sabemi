@@ -278,7 +278,10 @@ describe.each(BACKENDS)("nenhum login desta suíte gera e-mail — $nome", (back
       { email: emailDeTeste("sem-envio") },
     );
 
-    expect(inicio.status).toBe(200);
+    expect(
+      inicio.status,
+      "se for 429, suba a stack com AUTH_RATE_LIMIT=500 (ver tests/e2e/README.md)",
+    ).toBe(200);
     expect(
       inicio.body.email_sent,
       `email_sent veio true com email_provider="${provedor}". Um endereço em ` +

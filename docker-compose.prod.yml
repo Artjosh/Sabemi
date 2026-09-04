@@ -51,6 +51,10 @@ services:
       WebhookSecurity__RequireSignature: "true"
 
       Auth__PublicBaseUrl: ${API_PUBLIC_URL:?defina API_PUBLIC_URL}
+      # Falha fechada, igual ao servico `frontend`: em producao o servidor nunca
+      # devolve link nem codigo OTP na resposta. Fixo, e nao vindo do ambiente -
+      # nao ha valor de `.env` que ligue isto aqui.
+      Auth__ExposeLoginCodesInDevelopment: "false"
       Cors__AllowedOrigins__0: ${FRONTEND_PUBLIC_URL:?defina FRONTEND_PUBLIC_URL}
     deploy:
       resources:

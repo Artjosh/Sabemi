@@ -111,6 +111,17 @@ services:
       Supabase__Url: ${SUPABASE_URL:-}
       Supabase__AnonKey: ${SUPABASE_ANON_KEY:-}
 
+      # UMA variavel para os dois backends, com nomes internos diferentes: aqui o
+      # .NET le `Auth:ExposeLoginCodesInDevelopment`, e o VINEXT le
+      # `AUTH_EXPOSE_LOGIN_CODES` direto (abaixo, no servico `frontend`).
+      #
+      # Enquanto esta linha nao existia, a variavel desligava o atalho apenas no
+      # VINEXT: o .NET continuava devolvendo `dev_otp_code` no corpo da resposta,
+      # e quem a definisse acreditaria ter desligado nos dois. Uma flag de
+      # seguranca que so vale em metade do sistema e pior do que nenhuma, porque
+      # produz confianca sem produzir o efeito.
+      Auth__ExposeLoginCodesInDevelopment: ${AUTH_EXPOSE_LOGIN_CODES:-true}
+
       # E-mail de acesso pela Brevo. A MESMA conta que o backend VINEXT usa: o
       # e-mail e o mesmo produto, venha de qual backend vier, e duas contas
       # dariam duas reputacoes de envio a cuidar.
