@@ -43,7 +43,7 @@
  * nenhuma). O `layer(base)` continua aqui porque ainda ordena o resto.
  */
 
-@import "tailwindcss";
+@import "tailwindcss/index.css";
 
 /* Somente o grid - ver a explicacao acima. */
 @import "bootstrap/dist/css/bootstrap-grid.css" layer(base);

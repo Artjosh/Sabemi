@@ -36,6 +36,7 @@ Os quatro primeiros formam uma trilha, na ordem, com navegação no topo de cada
 | [`CONFIGURACAO.md`](docs/CONFIGURACAO.md) | Variáveis do `.env`, e-mail, Supabase, observabilidade |
 | [`TESTES.md`](docs/TESTES.md) | As suítes, como rodá-las e o que cobrem |
 | [`DEPLOY.md`](docs/DEPLOY.md) | Produção, secrets e escala |
+| [`DEPLOY-SERVERLESS.md`](docs/DEPLOY-SERVERLESS.md) | A topologia partida: Vercel + host de containers + Supabase |
 | [`APRESENTACAO.md`](docs/APRESENTACAO.md) | Arquitetura e as decisões técnicas, com o porquê de cada uma |
 
 ---

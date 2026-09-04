@@ -6,3 +6,7 @@ node_modules
 next-env.d.ts
 /dist/
 .vinext/
+
+# Saidas do build para Vercel/Nitro (ver vite.config.vercel.ts)
+.output/
+.vercel/

@@ -381,6 +381,11 @@ let loopStarted = false;
 export function ensureWorkerStarted(): void {
   if (!bffConfig.processing.workerEnabled) return;
 
+  // Em serverless nao ha laco: quem dispara o trabalho e cada requisicao que
+  // enfileira algo, via `agendarCicloAposResposta`. Ver a explicacao dos dois
+  // modos em `config.ts`.
+  if (bffConfig.processing.mode !== "loop") return;
+
   const g = globalThis as unknown as { __sabemiBffWorker?: boolean };
   if (loopStarted || g.__sabemiBffWorker) return;
 
@@ -409,4 +414,51 @@ export function ensureWorkerStarted(): void {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Roda um ciclo de processamento DEPOIS de a resposta ser enviada.
+ *
+ * <b>O requisito.</b> A task pede que o endpoint responda rapido ao banco
+ * enquanto a regra pesada (~2s) acontece em background. Num servidor de vida
+ * longa isso e o laco acima. Em serverless nao ha onde um laco viver - mas a
+ * plataforma oferece a primitiva certa: `waitUntil` estende a invocacao para
+ * depois da resposta, entao o webhook responde em milissegundos e os 2s rodam
+ * em seguida, dentro do mesmo pedido.
+ *
+ * <b>Por que ler o contexto por `Symbol.for` em vez de importar
+ * `@vercel/functions`.</b> Este modulo tambem roda no container e nos testes,
+ * onde esse pacote nao faz sentido; a busca pelo simbolo e a mesma que o proprio
+ * Next.js usa, nao adiciona dependencia, e simplesmente nao encontra nada fora
+ * da Vercel - o que e exatamente o comportamento desejado.
+ *
+ * <b>Fora da Vercel, o disparo e solto</b> (`void`). Num processo de vida longa
+ * isso e seguro: ninguem vai congelar a execucao no meio.
+ *
+ * <b>`waitUntil` nao tem retry</b> - se a promessa rejeitar, nada re-executa.
+ * Nao e problema aqui porque a fila e uma tabela com lease: o item volta a ficar
+ * reivindicavel e outro consumidor o pega. E por isso que este desenho pede um
+ * segundo consumidor da mesma fila (o worker .NET) quando roda em serverless.
+ */
+export function agendarCicloAposResposta(): void {
+  if (!bffConfig.processing.workerEnabled) return;
+  if (bffConfig.processing.mode === "loop") return;
+
+  const tarefa = (async () => {
+    try {
+      await runProcessingCycle();
+    } catch (error) {
+      console.error("[bff] ciclo de processamento falhou", error);
+    }
+  })();
+
+  const contexto = (
+    globalThis as unknown as {
+      [k: symbol]: { get?: () => { waitUntil?: (p: Promise<unknown>) => void } | undefined };
+    }
+  )[Symbol.for("@vercel/request-context")];
+
+  const waitUntil = contexto?.get?.()?.waitUntil;
+  if (waitUntil) waitUntil(tarefa);
+  else void tarefa;
 }

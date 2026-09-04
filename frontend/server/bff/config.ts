@@ -166,8 +166,33 @@ export const bffConfig = {
     pollIntervalMs: envInt("PROCESSING_POLL_INTERVAL_MS", 1_000),
     /** Prazo para concluir um item reivindicado antes de ser considerado orfao. */
     visibilityTimeoutMs: envInt("PROCESSING_VISIBILITY_TIMEOUT_MS", 120_000),
-    /** Liga o laco de processamento em processo. Desligado nos testes. */
+    /** Liga o processamento em background. Desligado nos testes. */
     workerEnabled: env("BFF_WORKER_ENABLED", "true") === "true",
+
+    /*
+     * COMO O TRABALHO DE FUNDO ACONTECE - e por que ha dois modos.
+     *
+     * `loop`: um laco continuo reivindica itens da fila enquanto o processo
+     * viver. E o modo correto num servidor de vida longa (container, VPS): a
+     * latencia e minima e o laco tambem devolve a fila os itens cujo lease
+     * expirou.
+     *
+     * `sob-demanda`: nao ha laco. Cada requisicao que enfileira trabalho agenda
+     * um ciclo para rodar DEPOIS de a resposta ser enviada. E o unico modo
+     * possivel em serverless, onde a invocacao congela apos a resposta e um
+     * `for(;;)` simplesmente nao sobrevive - ele rodaria enquanto a funcao
+     * estivesse quente e pararia sem aviso, deixando eventos presos em
+     * PENDENTE sem nada no log.
+     *
+     * O padrao e detectado: a Vercel define `VERCEL` no ambiente. Da para
+     * forcar com `BFF_PROCESSING_MODE`, que e o que os testes fazem.
+     *
+     * O que torna os dois modos equivalentes em durabilidade e a fila ser uma
+     * TABELA: um ciclo que morre no meio nao perde o item, porque o lease
+     * expira e ele volta a ficar reivindicavel. Em serverless, quem varre esses
+     * orfaos e o worker .NET, que consome a mesma fila - ver `docs/DEPLOY.md`.
+     */
+    mode: env("BFF_PROCESSING_MODE", env("VERCEL", "") ? "sob-demanda" : "loop"),
   },
 } as const;
 

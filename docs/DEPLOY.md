@@ -45,4 +45,17 @@ As réplicas consomem a mesma fila sem conflito — a reivindicação usa
 
 ---
 
+### Outra topologia: partido entre dois provedores
+
+O acima sobe os quatro containers num host só. Há um segundo caminho, em que o
+frontend e o backend VINEXT rodam na **Vercel**, os dois containers .NET num host
+de containers, e um **Supabase** é o banco compartilhado — com os dois lados
+competindo pela mesma fila.
+
+A Vercel não executa .NET, e o laço de fila do VINEXT não sobrevive a serverless;
+as duas coisas têm solução e estão descritas em
+[`DEPLOY-SERVERLESS.md`](DEPLOY-SERVERLESS.md).
+
+---
+
 Fim da trilha. Para entender **por que** o sistema é assim, [`APRESENTACAO.md`](APRESENTACAO.md).

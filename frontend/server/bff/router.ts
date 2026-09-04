@@ -21,7 +21,7 @@ import {
   ingestPayment,
   listPayments,
 } from "./payments-service";
-import { ensureWorkerStarted } from "./processing-service";
+import { agendarCicloAposResposta, ensureWorkerStarted } from "./processing-service";
 import { reenfileirar } from "./requeue-service";
 import { iniciarTelemetria } from "./telemetry-setup";
 
@@ -302,6 +302,9 @@ async function despachar(request: BffRequest): Promise<BffResponse> {
     const resultado = await reenfileirar(idTransacao);
 
     if (resultado.ok) {
+      // Reenfileirar tambem cria trabalho; em serverless ele precisa do mesmo
+      // disparo pos-resposta que a ingestao.
+      agendarCicloAposResposta();
       return { status: 200, body: resultado.value };
     }
 
@@ -363,7 +366,13 @@ async function handleWebhook(request: BffRequest): Promise<BffResponse> {
 
   // O codigo de resposta carrega significado: 202 aceito e enfileirado, 200 ja
   // conhecido (nada reprocessado), 400 invalido mas registrado.
-  if (resultado.kind === "accepted") return { status: 202, body: resultado.ack };
+  if (resultado.kind === "accepted") {
+    // Em serverless, e aqui que o trabalho de fundo e disparado - depois desta
+    // resposta, nao antes. No modo `loop` esta chamada nao faz nada, porque o
+    // laco ja esta cuidando da fila.
+    agendarCicloAposResposta();
+    return { status: 202, body: resultado.ack };
+  }
   if (resultado.kind === "duplicate") return { status: 200, body: resultado.ack };
 
   return problem(
