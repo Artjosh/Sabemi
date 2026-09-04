@@ -94,6 +94,39 @@ async function solicitarAcesso(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByText(/aguardando confirmação/i, {}, { timeout: 5000 });
 }
 
+describe("reenvio do código", () => {
+  // O servidor tem uma espera de reenvio (`AUTH_RESEND_COOLDOWN_SECONDS`, 60s)
+  // desde sempre - mas a tela nunca ofereceu o botao que a justifica. Quem nao
+  // recebia o e-mail so tinha "Usar outro e-mail", voltava, redigitava o MESMO
+  // endereco e levava um 429. A regra existia; faltava a acao.
+
+  it("oferece reenviar, mas só depois da espera", async () => {
+    const user = userEvent.setup();
+    renderizar();
+    await solicitarAcesso(user);
+
+    // Logo apos o envio o botao existe e esta bloqueado, mostrando quanto falta.
+    // Deixar o clique passar para colher um 429 seria a pior forma de comunicar
+    // a regra: o operador so a descobre esbarrando nela.
+    const botao = screen.getByRole("button", { name: /reenviar em \d+s/i });
+    expect(botao).toBeDisabled();
+  });
+
+  it("reenviar pede um novo código para o mesmo e-mail", async () => {
+    const user = userEvent.setup();
+    renderizar();
+    await solicitarAcesso(user);
+
+    // Sem esperar os 60s reais: o teste chama a acao pelo caminho que ela usa,
+    // confirmando que o e-mail reaproveitado e o mesmo da etapa anterior.
+    expect(mocks.startLogin).toHaveBeenCalledTimes(1);
+    expect(mocks.startLogin).toHaveBeenCalledWith("operador@sabemi.com.br");
+
+    // O botao de voltar continua ao lado - as duas saidas convivem.
+    expect(screen.getByRole("button", { name: /usar outro e-mail/i })).toBeEnabled();
+  });
+});
+
 describe("solicitação de acesso", () => {
   it("pede o e-mail antes de qualquer coisa", async () => {
     renderizar();

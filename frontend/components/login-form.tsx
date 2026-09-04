@@ -35,6 +35,17 @@ import type { MagicLinkStartDto } from "@/lib/contracts";
  * que ja nao esta na tela.
  */
 
+/**
+ * Espelha `AUTH_RESEND_COOLDOWN_SECONDS` do servidor.
+ *
+ * Duplicar um numero e sempre um risco; aqui ele e aceitavel porque o valor NAO
+ * decide nada - quem recusa um reenvio cedo demais e o servidor. Se os dois
+ * saissem de sincronia, o pior caso e o botao liberar um pouco antes ou depois,
+ * e a mensagem do 429 (escrita para o operador, com os segundos restantes)
+ * continuar correta.
+ */
+const SEGUNDOS_DE_ESPERA = 60;
+
 type Step = "email" | "waiting";
 
 export function LoginForm() {
@@ -51,12 +62,30 @@ export function LoginForm() {
   const [verificando, setVerificando] = React.useState(false);
   const [aguardando, setAguardando] = React.useState(false);
 
+  /**
+   * Segundos que faltam para poder pedir outro codigo.
+   *
+   * O servidor ja recusa um reenvio cedo demais (`AUTH_RESEND_COOLDOWN_SECONDS`,
+   * 60s, contado na tabela de pedidos que os dois backends compartilham). O
+   * contador aqui nao substitui essa regra - ele so a torna VISIVEL. Sem ele o
+   * botao aceitaria o clique para devolver um 429, que e a pior forma de dizer
+   * "espere": o operador so descobre a regra ao esbarrar nela.
+   */
+  const [esperaReenvio, setEsperaReenvio] = React.useState(0);
+
   // Redirect reativo ao usuario: qualquer caminho que autentique - polling, OTP
   // ou restauracao de sessao - cai aqui. Centralizar evita a corrida em que a
   // aba fica "presa" no login apos confirmar o link.
   React.useEffect(() => {
     if (user) router.replace("/dashboard");
   }, [user, router]);
+
+  // Regressiva do reenvio. Um unico intervalo enquanto houver o que contar.
+  React.useEffect(() => {
+    if (esperaReenvio <= 0) return;
+    const timer = setTimeout(() => setEsperaReenvio((s) => s - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [esperaReenvio]);
 
   // O polling propriamente dito, atrelado ao ciclo de vida da etapa de espera.
   React.useEffect(() => {
@@ -93,6 +122,7 @@ export function LoginForm() {
       const resultado = await beginLogin(email);
       setPedido(resultado);
       setStep("waiting");
+      setEsperaReenvio(SEGUNDOS_DE_ESPERA);
 
       if (!resultado.email_sent && !resultado.dev_magic_url) {
         setAviso("Não foi possível enviar o e-mail agora. Tente novamente em instantes.");
@@ -130,6 +160,37 @@ export function LoginForm() {
       setOtp("");
     } finally {
       setVerificando(false);
+    }
+  };
+
+  /**
+   * Pede outro codigo para o MESMO e-mail.
+   *
+   * O servidor invalida o pedido anterior e emite um novo `selector`, entao o
+   * polling precisa passar a observar o novo - o que acontece sozinho, porque o
+   * efeito do polling depende de `pedido.selector`.
+   */
+  const reenviar = async () => {
+    if (esperaReenvio > 0 || enviando) return;
+
+    setErro(null);
+    setAviso(null);
+    setEnviando(true);
+
+    try {
+      const resultado = await beginLogin(email);
+      setPedido(resultado);
+      setOtp("");
+      setEsperaReenvio(SEGUNDOS_DE_ESPERA);
+
+      if (!resultado.email_sent && !resultado.dev_magic_url) {
+        setAviso("Não foi possível enviar o e-mail agora. Tente novamente em instantes.");
+      }
+    } catch (error) {
+      // A mensagem do 429 traz os segundos que faltam e e escrita para quem le.
+      setErro(error instanceof ApiError ? error.message : "Não foi possível reenviar o código.");
+    } finally {
+      setEnviando(false);
     }
   };
 
@@ -315,9 +376,22 @@ export function LoginForm() {
                   {verificando ? "Verificando…" : "Entrar com o código"}
                 </Button>
 
-                <Button type="button" variant="ghost" size="sm" onClick={voltar}>
-                  Usar outro e-mail
-                </Button>
+                <div className="flex items-center justify-between gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void reenviar()}
+                    disabled={esperaReenvio > 0 || enviando}
+                  >
+                    <i className="bi bi-arrow-clockwise" aria-hidden="true" />
+                    {esperaReenvio > 0 ? `Reenviar em ${esperaReenvio}s` : "Reenviar código"}
+                  </Button>
+
+                  <Button type="button" variant="ghost" size="sm" onClick={voltar}>
+                    Usar outro e-mail
+                  </Button>
+                </div>
               </form>
             </CardContent>
           </>
