@@ -56,6 +56,10 @@ O acesso é por e-mail, sem senha: o sistema envia um link e um código de 6
 dígitos. O atalho de desenvolvimento que exibia o código na tela está
 **desligado** (`AUTH_EXPOSE_LOGIN_CODES=false`), como em produção de verdade.
 
+Um `git push` na `main` implanta os três sozinho: o CI publica as imagens e o
+job de deploy avisa o Railway pela API — sem depender do vínculo entre a conta do
+Railway e a do GitHub, que é o que costuma faltar.
+
 O deploy está descrito em [`docs/DEPLOY.md`](docs/DEPLOY.md), incluindo as
 armadilhas que ele revelou.
 
