@@ -45,6 +45,43 @@ As réplicas consomem a mesma fila sem conflito — a reivindicação usa
 
 ---
 
+### O .NET usa a conexão DIRETA; o VINEXT usa o pooler
+
+Contra um Supabase, os dois backends precisam de portas diferentes — e isso não
+é preferência, é o que funciona.
+
+| Serviço | Porta | Por quê |
+| --- | --- | --- |
+| `api`, `worker` (.NET) | **5432** direta | ver os dois motivos abaixo |
+| `frontend` (VINEXT) | **6543** pooler | Prisma/`pg` funcionam bem nele |
+
+**1. O Npgsql trava contra o pooler em modo transação.** O login do .NET
+pendurava 30 s e estourava com `TimeoutException: Timeout during reading
+attempt` num `UPDATE` — o driver esperando dados que o Supavisor nunca entrega.
+Não é lock: `pg_locks` mostrava zero locks não concedidos e nenhuma transação
+presa. O VINEXT, no MESMO pooler, respondia em menos de um segundo; o problema é
+do par Npgsql + Supavisor.
+
+**2. O `api` roda migrations na subida**, e o pooler em modo transação não
+executa DDL. Isso passou despercebido no primeiro deploy só porque as migrations
+já tinham sido aplicadas à mão pela conexão direta. Num banco limpo, teria
+falhado na primeira subida.
+
+O sintoma do primeiro caso engana: o serviço responde `200` no `/health`, o painel
+abre, e só o login trava — porque é a primeira rota que escreve.
+
+### Duas variáveis de URL pública que só aparecem no deploy
+
+Os dois backends montam o link de confirmação do acesso, e cada um tem a sua
+base:
+
+- `Auth__PublicBaseUrl` (ou `API_PUBLIC_URL`) — o .NET
+- `BFF_PUBLIC_BASE_URL` — o VINEXT
+
+Sem elas o link sai apontando para `http://localhost:3000`, e o e-mail de acesso
+leva a lugar nenhum. Localmente ninguém percebe: `localhost` é justamente onde a
+pessoa está.
+
 ### Railway: as três imagens vindas do repositório
 
 O caminho usado no deploy real deste projeto. Três serviços, todos apontando
