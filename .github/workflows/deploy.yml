@@ -53,7 +53,9 @@ jobs:
   publicar:
     name: Publica as imagens
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # O build do frontend (pnpm install + prisma generate + vinext build)
+    # chegou a 29,7 min e foi cancelado no limite anterior de 30.
+    timeout-minutes: 45
 
     strategy:
       matrix:
@@ -110,6 +112,49 @@ jobs:
           sbom: true
 
   # ------------------------------------------------------------------ deploy
+  # ------------------------------------------------------------------ Railway
+  #
+  # NAO depende de `publicar`, e a razao e concreta: o Railway constroi a partir
+  # do REPOSITORIO, pelos Dockerfiles. Ele nunca consome as imagens do GHCR.
+  #
+  # Isso ja custou um deploy. Com o passo dentro de `implantar` (que precisa das
+  # imagens), o build da imagem do frontend estourou os 30 minutos de timeout, a
+  # matriz inteira foi cancelada, e o deploy no Railway - que nao dependia de
+  # nada daquilo - foi pulado junto.
+  #
+  # O `if` NAO pode consultar `secrets` direto: o contexto nao existe em
+  # condicional de step, e o GitHub recusa o workflow INTEIRO na validacao, sem
+  # rodar job nenhum e sem dizer qual linha. O sintoma e obscuro - o run aparece
+  # com o nome do arquivo no lugar do nome do workflow. Por isso um passo
+  # anterior le o segredo por `env` e publica um output, que e o mesmo padrao
+  # usado abaixo para o DEPLOY_HOST.
+  railway:
+    name: Implanta no Railway
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verifica se ha Railway configurado
+        id: alvo
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          if [ -n "$RAILWAY_TOKEN" ]; then
+            echo "configurado=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configurado=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::RAILWAY_TOKEN nao configurado - o deploy no Railway foi ignorado."
+          fi
+
+      - name: Dispara o deploy
+        if: steps.alvo.outputs.configurado == 'true'
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+        run: node scripts/deploy-railway.mjs
+
   implantar:
     name: Implanta (${{ inputs.ambiente || 'staging' }})
     runs-on: ubuntu-latest
@@ -132,34 +177,6 @@ jobs:
       #
       # Este passo inverte a direcao e resolve com um segredo so. Roda apenas se
       # RAILWAY_TOKEN existir; sem ele, e ignorado em silencio.
-      #
-      # O `if` NAO pode consultar `secrets` direto: o contexto nao existe em
-      # condicional de step, e o GitHub recusa o workflow inteiro na validacao -
-      # sem rodar job nenhum e sem dizer qual linha. O sintoma e o run aparecer
-      # com o NOME DO ARQUIVO no lugar do nome do workflow, porque ele nem
-      # chegou a ser lido.
-      #
-      # A saida e a mesma que este arquivo ja usa para o DEPLOY_HOST: um passo
-      # anterior le o segredo por `env` e publica um output.
-      - name: Verifica se ha Railway configurado
-        id: railway
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: |
-          if [ -n "$RAILWAY_TOKEN" ]; then
-            echo "configurado=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "configurado=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::RAILWAY_TOKEN nao configurado - o deploy no Railway foi ignorado."
-          fi
-
-      - name: Deploy no Railway
-        if: steps.railway.outputs.configurado == 'true'
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
-        run: node scripts/deploy-railway.mjs
-
       - name: Verifica se ha alvo configurado
         id: alvo
         run: |
