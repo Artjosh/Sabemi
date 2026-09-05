@@ -38,6 +38,7 @@ Os quatro primeiros formam uma trilha, na ordem, com navegação no topo de cada
 | [`DEPLOY.md`](docs/DEPLOY.md) | Produção, secrets e escala |
 | [`DEPLOY-SERVERLESS.md`](docs/DEPLOY-SERVERLESS.md) | A topologia partida: Vercel + host de containers + Supabase |
 | [`APRESENTACAO.md`](docs/APRESENTACAO.md) | Arquitetura e as decisões técnicas, com o porquê de cada uma |
+| [`APRESENTACAO-SLIDES.md`](docs/APRESENTACAO-SLIDES.md) | A mesma história em 16 cartões, para apresentar |
 
 ---
 
