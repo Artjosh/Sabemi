@@ -168,8 +168,7 @@ mostra "Na fila" crescendo para sempre, com os dois backends aparentemente
 saudáveis.
 
 O banco é um **Supabase remoto**, migrado uma vez pela porta 5432 (direta) e
-consumido pela 6543 (pooler) — ver a seção 1 de
-[`DEPLOY-SERVERLESS.md`](DEPLOY-SERVERLESS.md), que vale igual aqui.
+consumido pela 6543 (pooler) — ver [`DEPLOY-SERVERLESS.md`](DEPLOY-SERVERLESS.md), que vale igual aqui.
 
 ### Outra topologia: partido entre dois provedores
 

@@ -37,8 +37,7 @@ Os quatro primeiros formam uma trilha, na ordem, com navegação no topo de cada
 | [`TESTES.md`](docs/TESTES.md) | As suítes, como rodá-las e o que cobrem |
 | [`DEPLOY.md`](docs/DEPLOY.md) | Produção, secrets e escala |
 | [`DEPLOY-SERVERLESS.md`](docs/DEPLOY-SERVERLESS.md) | A topologia partida: Vercel + host de containers + Supabase |
-| [`APRESENTACAO.md`](docs/APRESENTACAO.md) | Arquitetura e as decisões técnicas, com o porquê de cada uma |
-| [`APRESENTACAO-SLIDES.md`](docs/APRESENTACAO-SLIDES.md) | A mesma história em 16 cartões, para apresentar |
+| [`APRESENTACAO.md`](docs/APRESENTACAO.md) | A apresentação: o problema, as decisões e os limites, em seis cartões |
 
 ---
 
@@ -98,5 +97,5 @@ scripts/migrar.mjs            Migrations (local ou remoto) + verificação do Pr
 scripts/verificar-email.mjs   Diagnóstico do envio de e-mail, sob demanda
 scripts/smoke-test.sh         Verificação da stack em execução
 tests/e2e/                    Ponta a ponta contra a stack em containers
-docs/APRESENTACAO.md          Arquitetura e decisões técnicas
+docs/APRESENTACAO.md          A apresentação, em seis cartões
 ```

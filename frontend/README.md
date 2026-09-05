@@ -101,6 +101,6 @@ curl -s -o /dev/null -w "%{http_code}
 " http://localhost:3000/fonts/bootstrap-icons.woff2
 ```
 
-A divisão está documentada em `app/globals.css`, e as duas armadilhas — a
-colisoão de `!important` e a fonte que dava 404 — em
-[`docs/APRESENTACAO.md`](../docs/APRESENTACAO.md).
+A divisão e as duas armadilhas — a colisão de `!important` e a fonte que dava
+404 — estão documentadas nos comentários de `app/globals.css` e
+`postcss.config.mjs`, que é onde quem for mexer vai olhar.
