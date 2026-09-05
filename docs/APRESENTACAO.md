@@ -1123,9 +1123,30 @@ fecha a porta do PostgreSQL, exige assinatura HMAC, sobe duas réplicas do worke
 aplica limites de recursos e **recusa subir sem os segredos reais** — a sintaxe
 `${VAR:?mensagem}` impede que um segredo de desenvolvimento chegue a produção.
 
-O job de deploy por SSH está declarado e condicionado à existência dos segredos.
-Um teste técnico não tem ambiente de produção para receber o deploy; deixar o
-passo pronto e inerte é mais honesto do que fingir uma publicação.
+### O sistema está publicado
+
+| | |
+| --- | --- |
+| **Painel** | https://frontend-production-5213.up.railway.app |
+| **API .NET** | https://api-production-8d41.up.railway.app |
+
+Três serviços num host de containers — `api`, `worker` e `frontend` — construídos
+a partir dos Dockerfiles deste repositório, com um **Supabase** como banco
+compartilhado. O `worker` não recebe domínio: ele não atende requisição, só
+consome a fila.
+
+`api` e `worker` saem do **mesmo Dockerfile**, diferenciados pelo build arg
+`APP_PROJECT` — que é exatamente a intenção registrada no comentário dele.
+
+**Um `git push` na `main` publica os três.** O caminho não é o auto-deploy nativo
+da plataforma: ele exige que a conta do host esteja vinculada à do GitHub por
+OAuth, e esse vínculo não existe quando a conta foi criada por e-mail. O sintoma
+engana — o host clona e constrói (o repositório é público) mas nunca assina os
+eventos de push. `scripts/deploy-railway.mjs` inverte a direção: é o GitHub
+Actions que avisa o host, por API. Um segredo, nenhum vínculo entre contas.
+
+O job de deploy por SSH continua declarado e condicionado aos segredos, para quem
+preferir publicar em uma máquina própria a partir das imagens do GHCR.
 
 ---
 
@@ -1200,8 +1221,9 @@ próximo passo natural é aceitar um conjunto de chaves em vez de uma só.
 **Cobertura do código de configuração.** A observabilidade, o cliente Brevo e o
 provedor GoTrue têm testes de comportamento, mas os caminhos de *montagem*
 (`AddOpenTelemetry(...)`, seleção de exportador) não são exercitados. Cobri-los
-mediria a biblioteca, não a aplicação — e o número global caiu de 98 % para 84 %
-por causa disso. O limiar de 80 % continua sendo respeitado.
+mediria a biblioteca, não a aplicação — e o número global caiu para 81,6 % por
+causa disso. O limiar de 80 % continua sendo respeitado, com menos folga do que
+antes: vale saber antes de acrescentar código sem teste.
 
 **Tracing entre os backends não é correlacionado.** Cada serviço emite os próprios
 spans, mas o `traceparent` não é propagado do webhook para o job — o trabalho é
@@ -1209,7 +1231,7 @@ assíncrono e a propagação exigiria carregar o contexto na linha da fila. É o
 próximo passo natural da observabilidade, e não foi feito.
 
 **Rate limit do login e a suíte E2E.** O endpoint de autenticação aceita 10
-pedidos por minuto por IP — apropriado para produção, apertado para uma suíte que
+pedidos por minuto por IP — o valor que está em produção — apropriado para produção, apertado para uma suíte que
 faz dezenas de logins do mesmo IP em segundos. O limite é configurável
 (`RateLimit:AuthPermitLimit`) e a suíte sobe a stack com um teto maior. A
 alternativa seria enfraquecer o limite para todo mundo.
